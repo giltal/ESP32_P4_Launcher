@@ -532,7 +532,7 @@ libc glue moves into the SDK.
 | D5 | Forced kill of app threads | Allowed, because drivers are behind launcher queues | Spike C |
 | D6 | libc in apps: toolchain newlib (static) vs launcher-exported libc | Static newlib from toolchain + SDK syscalls (as today, but shared) | Spike D |
 | D7 | Fixed codec rate + mixer vs per-app I2S rate | Fixed rate + resampler | Phase 2 audio |
-| D8 | Launcher UI toolkit | LVGL v9 | Phase 5 |
+| D8 | Launcher UI toolkit | **Decided:** LVGL 9.2 for the home screen (launcher 0.9.0); app-facing UI screens (browser, menus) stay on the light `lx_gfx` renderer so they draw over apps cheaply | Phase 5 — done for the home screen |
 | D9 | Emulators: PAPP vs keep OTA | Pilot then decide (gate in Phase 7) | Phase 7 |
 | D10 | v1 binary compatibility | No — rebuild ports | — |
 

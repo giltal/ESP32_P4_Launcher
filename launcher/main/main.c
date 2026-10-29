@@ -1,9 +1,9 @@
 /*
  * ESP32-P4 Launcher — entry point.
  *
- * Phase 1 bring-up: board init → display, touch, audio → SD → App Manager →
- * DevLink, and a status screen while no app runs. Apps are uploaded and started remotely with
- * tools/papp_dev.py until the launcher UI exists.
+ * Board init → display, touch, audio → SD → App Manager → input → DevLink →
+ * home screen (home.c), from which apps are started; tools/papp_dev.py can
+ * also upload and start them remotely.
  */
 #include "bsp.h"
 #include "lx_app.h"
@@ -11,7 +11,7 @@
 #include "lx_comp.h"
 #include "lx_audio.h"
 #include "lx_input.h"
-#include "status_screen.h"
+#include "home.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -29,12 +29,6 @@ static void on_app_exit(const char *path, int code, bool forced,
                         uint32_t leaked_allocs, uint32_t leaked_files)
 {
     lx_devlink_app_exited(path, code, forced, leaked_allocs, leaked_files);
-
-    const char *name = strrchr(path, '/');
-    char text[96];
-    snprintf(text, sizeof(text), "%s -> %d%s", name ? name + 1 : path, code, forced ? " (forced)" : "");
-    status_screen_set_last_app(text);
-    status_screen_draw();
 }
 
 /* Two short notes at boot. Timing the write checks the I2S clock: once the DMA
@@ -57,60 +51,7 @@ static void play_chime(void)
     int ms = (int)((esp_timer_get_time() - t0) / 1000);
     free(pcm);
 
-    char text[64];
-    snprintf(text, sizeof(text), "%d Hz, %d ms chime took %d ms", rate,
-             (int)(done * 1000 / rate), ms);
-    status_screen_set_audio(text);
-    ESP_LOGI(TAG, "audio: %s", text);
-}
-
-/* Player 1 + devices summary for the status screen, e.g. "P1 DualShock 3: A UP" */
-static void input_summary(char *buf, size_t len)
-{
-    static const char *const names[20] = {
-        "A", "B", "X", "Y", "L1", "R1", "L2", "R2", "SEL", "START", "L3", "R3", "HOME", "MISC",
-        NULL, NULL, "UP", "DOWN", "LEFT", "RIGHT",
-    };
-    lx_input_describe(buf, len);
-    papp_gamepad_t gp;
-    size_t n = strlen(buf);
-    if (lx_input_gamepad(0, &gp) && gp.buttons) {
-        n += snprintf(buf + n, len - n, ":");
-        for (int b = 0; b < 20 && n < len; b++)
-            if ((gp.buttons & (1u << b)) && names[b]) n += snprintf(buf + n, len - n, " %s", names[b]);
-    }
-}
-
-/* Status screen live lines until the launcher UI exists: touch point + input. */
-static void status_task(void *arg)
-{
-    char input[96] = "", prev_input[96] = "";
-    bool was_down = false;
-    int last_x = 0, last_y = 0;
-    int64_t last_draw = 0;
-    for (;;) {
-        bsp_touch_point_t p[BSP_TOUCH_MAX_POINTS];
-        int n = (bsp_info()->caps & BSP_CAP_TOUCH) ? bsp_touch_read(p, BSP_TOUCH_MAX_POINTS) : 0;
-        input_summary(input, sizeof(input));
-        bool input_changed = strcmp(input, prev_input) != 0;   /* cleared when drawn */
-        bool down = n > 0;
-        if (down && !was_down) ESP_LOGI(TAG, "touch down %d,%d (%d points)", p[0].x, p[0].y, n);
-        if (!down && was_down) ESP_LOGI(TAG, "touch up");
-        if (down) status_screen_set_touch(true, p[0].x, p[0].y);
-        else if (was_down) status_screen_set_touch(false, last_x, last_y);
-        if (down) { last_x = p[0].x; last_y = p[0].y; }
-
-        int64_t now = esp_timer_get_time();
-        bool idle = lx_app_state() == LX_APP_IDLE;     /* a running app may have UI screens up */
-        if (idle && (down != was_down || ((down || input_changed) && now - last_draw > 66000))) {   /* ~15 fps */
-            strcpy(prev_input, input);
-            status_screen_set_input(input);
-            status_screen_draw();
-            last_draw = now;
-        }
-        was_down = down;
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
+    ESP_LOGI(TAG, "audio: %d Hz, %d ms chime took %d ms", rate, (int)(done * 1000 / rate), ms);
 }
 
 /* HOME (or Select+Start held) — until the overlay menu exists, it quits the app. */
@@ -152,7 +93,7 @@ void app_main(void)
         play_chime();               /* straight to the BSP, before the mixer owns it */
         if (lx_audio_init() != ESP_OK) ESP_LOGE(TAG, "audio mixer init failed");
     }
-    status_screen_draw();
-    xTaskCreate(status_task, "status", 4096, NULL, 3, NULL);
+    if (home_start() != ESP_OK)
+        ESP_LOGE(TAG, "home screen failed to start");
     ESP_LOGI(TAG, "ready");
 }

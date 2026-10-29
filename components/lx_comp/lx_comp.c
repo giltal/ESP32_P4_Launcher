@@ -243,6 +243,51 @@ esp_err_t lx_comp_present(lx_surface_t *s)
     return err;
 }
 
+esp_err_t lx_comp_launcher_present(const uint16_t *frame)
+{
+    if (!s_lock || !frame) return ESP_ERR_INVALID_ARG;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_surface) {                       /* an app owns the display */
+        xSemaphoreGive(s_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    const bsp_info_t *b = bsp_info();
+    size_t bytes = (size_t)s_dw * s_dh * 2;
+    esp_cache_msync((void *)frame, bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    bsp_display_wait_flip(FLIP_WAIT_MS);
+    int back = bsp_display_visible() ^ 1;
+    uint16_t *fb = bsp_display_fb(back);
+    ppa_srm_oper_config_t op = {
+        .in = {
+            .buffer = frame,
+            .pic_w = s_dw, .pic_h = s_dh,
+            .block_w = s_dw, .block_h = s_dh,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .out = {
+            .buffer = fb,
+            .buffer_size = (size_t)b->display_w * b->display_h * 2,
+            .pic_w = b->display_w, .pic_h = b->display_h,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .rotation_angle = b->display_rot == 90  ? PPA_SRM_ROTATION_ANGLE_90 :
+                          b->display_rot == 180 ? PPA_SRM_ROTATION_ANGLE_180 :
+                          b->display_rot == 270 ? PPA_SRM_ROTATION_ANGLE_270 : PPA_SRM_ROTATION_ANGLE_0,
+        .scale_x = 1.0f,
+        .scale_y = 1.0f,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+    esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
+    if (err == ESP_OK) {
+        s_fb_clean[back] = false;
+        bsp_display_show(back);
+    } else {
+        ESP_LOGE(TAG, "launcher present: PPA SRM failed: %s", esp_err_to_name(err));
+    }
+    xSemaphoreGive(s_lock);
+    return err;
+}
+
 int lx_comp_touch_read(lx_surface_t *s, bsp_touch_point_t *pts, int max)
 {
     if (!s || s != s_surface) return -1;

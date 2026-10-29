@@ -44,7 +44,8 @@ void papp_rt_init(void)
     _REENT_INIT_PTR(&s_reent);
     const papp_if_thrd_t *thrd = papp_if_thrd();
     if (thrd) {
-        *thrd->tls_slot() = &s_reent;
+        void **slot = thrd->tls_slot();
+        if (slot) *slot = &s_reent;
         s_libc_lock = thrd->mutex_create(true);
     }
 }

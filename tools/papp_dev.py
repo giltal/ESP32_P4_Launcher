@@ -44,7 +44,7 @@ HDR = struct.Struct("<BBHI")            # type, flags, seq, len
 F_ERROR, F_APP = 0x01, 0x02
 CHUNK = 16 * 1024
 
-PING, INFO = 0x01, 0x02
+PING, INFO, TIME = 0x01, 0x02, 0x03
 LS, STAT, MKDIR, RM, RENAME = 0x10, 0x11, 0x12, 0x13, 0x14
 PUT_BEGIN, PUT_DATA, PUT_END, GET = 0x20, 0x21, 0x22, 0x28
 RUN, STOP, STATUS = 0x30, 0x31, 0x32
@@ -480,6 +480,12 @@ def main():
     except (DevLinkError, serial.SerialException) as e:
         print(f"error: {e}", file=sys.stderr)
         return 125
+    try:
+        # The board may have no clock source: give it ours (local wall-clock time)
+        now = time.time()
+        dl.request(TIME, struct.pack("<q", int(now + time.localtime(now).tm_gmtoff)), timeout=2.0)
+    except DevLinkError:
+        pass                    # older launcher
 
     try:
         c = args.cmd

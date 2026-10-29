@@ -70,6 +70,7 @@ static app_t                    *s_app;
 static volatile lx_app_state_t   s_state;
 static QueueHandle_t             s_queue;
 static lx_app_exit_cb_t          s_exit_cb;
+static char                      s_cur_path[128];
 static volatile uint32_t         s_run;          /* tags MSG_EXITED so a late one can't end the next run */
 
 /* Survives a panic reboot so the next boot can say which app crashed and where. */
@@ -346,6 +347,9 @@ static void app_task(void *arg)
 {
     app_t *a = arg;
     papp_start_fn_t start = (papp_start_fn_t)((uint8_t *)a->exec + a->hdr.entry_off);
+    /* Register before any app code runs: a launcher task on this core with a
+     * lower priority is preempted inside xTaskCreate, before it could do so */
+    lx_thrd_begin_run(xTaskGetCurrentTaskHandle());
     lx_app_post_exit(start(a->argc, a->argv));
     for (;;) vTaskSuspend(NULL);    /* the App Manager deletes us (and may resume us meanwhile) */
 }
@@ -404,6 +408,7 @@ esp_err_t lx_app_launch(const char *path, int argc, const char *const *argv,
 
     lx_svc_begin_run();
     s_run++;
+    snprintf(s_cur_path, sizeof(s_cur_path), "%s", a->path);
     s_app = a;
     s_state = LX_APP_RUNNING;
 
@@ -416,7 +421,6 @@ esp_err_t lx_app_launch(const char *path, int argc, const char *const *argv,
 
     a->task = xTaskCreateStaticPinnedToCore(app_task, "papp_main", stack / sizeof(StackType_t),
                                             a, APP_TASK_PRIO, a->stack, a->tcb, APP_TASK_CORE);
-    lx_thrd_begin_run(a->task);
     return ESP_OK;
 }
 
@@ -464,6 +468,7 @@ static void teardown(int code, bool forced)
     strlcpy(path, a->path, sizeof(path));
     app_free(a);
     s_app = NULL;
+    s_cur_path[0] = 0;
     s_crash_rec.magic = 0;
     s_state = LX_APP_IDLE;
 
@@ -535,12 +540,31 @@ lx_app_state_t lx_app_state(void)
 
 const char *lx_app_path(void)
 {
-    return s_app ? s_app->path : "";
+    return s_cur_path;          /* a copy: the app record is freed at exit, under readers' feet */
 }
 
 uint32_t lx_app_exec_base(void)
 {
     return s_app ? (uint32_t)(uintptr_t)s_app->exec : 0;
+}
+
+esp_err_t lx_app_read_manifest(const char *path, papp_manifest_t *out)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return ESP_ERR_NOT_FOUND;
+    papp2_header_t h;
+    esp_err_t e = ESP_ERR_INVALID_ARG;
+    if (fread(&h, 1, sizeof(h), f) == sizeof(h) && h.magic == PAPP2_MAGIC && h.manifest_off &&
+        h.manifest_off + sizeof(*out) <= h.image_size &&
+        fseek(f, sizeof(h) + h.manifest_off, SEEK_SET) == 0 &&
+        fread(out, 1, sizeof(*out), f) == sizeof(*out) && out->magic == PAPP_MANIFEST_MAGIC) {
+        out->id[sizeof(out->id) - 1] = 0;
+        out->name[sizeof(out->name) - 1] = 0;
+        out->version[sizeof(out->version) - 1] = 0;
+        e = ESP_OK;
+    }
+    fclose(f);
+    return e;
 }
 
 bool lx_app_last_crash(lx_app_crash_ctx_t *out)

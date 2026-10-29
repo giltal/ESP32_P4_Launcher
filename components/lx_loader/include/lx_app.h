@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "papp_abi.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,6 +52,9 @@ esp_err_t lx_app_stop(uint32_t grace_ms);
 lx_app_state_t lx_app_state(void);
 const char    *lx_app_path(void);          /* "" when idle */
 uint32_t       lx_app_exec_base(void);     /* 0 when idle  */
+
+/* Reads an app's manifest (name, id, version) without loading the app. */
+esp_err_t lx_app_read_manifest(const char *path, papp_manifest_t *out);
 
 /* True if the previous reset was a crash while an app was running. */
 bool lx_app_last_crash(lx_app_crash_ctx_t *out);

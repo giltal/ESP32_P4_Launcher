@@ -30,3 +30,19 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # internal SRAM, which needs heap SRAM to be executable (MALLOC_CAP_EXEC). Costs the
 # PMP split between launcher code and data (no W^X for internal RAM).
 CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n
+
+# Launcher UI (LVGL 9): system malloc (big blocks go to PSRAM), fonts for the home screen,
+# PNG icons read from the SD card through stdio ("S:/sd/apps/<app>/icon.png")
+CONFIG_LV_USE_CLIB_MALLOC=y
+CONFIG_LV_DEF_REFR_PERIOD=16
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+CONFIG_LV_FONT_DEFAULT_MONTSERRAT_16=y
+CONFIG_LV_USE_FS_STDIO=y
+CONFIG_LV_FS_STDIO_LETTER=83
+CONFIG_LV_FS_STDIO_PATH=""
+CONFIG_LV_USE_LODEPNG=y

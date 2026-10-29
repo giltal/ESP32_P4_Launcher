@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <dirent.h>
 #include <errno.h>
 #include <sys/stat.h>
@@ -495,6 +496,19 @@ static void dispatch(uint8_t type, uint16_t seq, uint8_t *p, uint32_t len)
 
     switch (type) {
     case DL_PING:   reply_str(type, seq, "pong"); break;
+    case DL_TIME:
+        if (len >= 8) {
+            /* Boards without RTC/network get the clock from the host; it sends
+             * its local wall-clock time, so the launcher treats it as UTC. */
+            int64_t secs;
+            memcpy(&secs, p, sizeof(secs));
+            struct timeval tv = { .tv_sec = (time_t)secs };
+            settimeofday(&tv, NULL);
+            reply_str(type, seq, "ok");
+        } else {
+            reply_err(type, seq, "bad TIME request");
+        }
+        break;
     case DL_INFO:   h_info(seq); break;
     case DL_LS:     h_ls(seq, len ? str : "/sd"); break;
     case DL_STAT:   h_stat(seq, str); break;

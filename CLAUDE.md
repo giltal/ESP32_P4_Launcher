@@ -9,7 +9,7 @@ Design: `docs/ARCHITECTURE.md`. Plan + status: `docs/WORKPLAN.md`.
 ## Layout
 
 ```
-launcher/                 ESP-IDF project (factory app; main.c + status_screen.c). Board: -DLX_BOARD=<id> (default guition_p4_43)
+launcher/                 ESP-IDF project (factory app; main.c + home.c = LVGL home screen). Board: -DLX_BOARD=<id> (default guition_p4_43)
 boards/<id>/board/        BSP implementation (component "board"); boards/<id>/sdkconfig.board
 components/bsp/           BSP contract (bsp.h) — the core only talks to hardware through it
 components/papp_abi/      papp_abi.h — .papp v2 format + interfaces (shared with apps; no IDF includes)
@@ -28,8 +28,7 @@ apps/                     Test/demo apps (hello, libc_test, gfx_demo: DISP test,
                           thread_test: THRD test (--libc), args all|leave|exit|spin;
                           fast_bench: PSRAM vs FAST (internal SRAM) placement benchmark, arg rounds;
                           browse_test: UI browser test, args root exts save_dir picks;
-                          nes/: NES emulator (nofrendo), build with `python apps
-esuild.py`,
+                          nes/: NES emulator (nofrendo), build with `python apps/nes/build.py`,
                           no args = ROM browser, or `-- <rom> [resume]`)
 tools/papp_dev.py         DevLink host tool
 tests/host/test_reloc.py  Host relocation equivalence test
@@ -52,6 +51,8 @@ python tools\papp_dev.py --port COM9 crash --elf build\apps\hello\hello.elf    #
 python tests\host\test_reloc.py                                               # packer/relocator check
 ```
 
+Apps in `/sd/apps/<dir>/<file>.papp` (+ optional `icon.png`) appear on the home screen. Every `papp_dev.py`
+command also sets the board clock from the PC.
 `deploy` = upload to `/sd/apps/<name>/<name>.papp` → run → stream logs → exit code of the app
 (124 timeout). `shot out.png` = screenshot of the visible framebuffer, in landscape (open it to see
 the screen). Other commands: `info ls stat put get rm mkdir mv run stop status log reboot crash-clear`.
