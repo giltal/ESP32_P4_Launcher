@@ -423,6 +423,53 @@ typedef struct {
     uint32_t       (*queue_count)(papp_queue_t *q);
 } papp_if_thrd_t;
 
+/* ── UI interface ───────────────────────────────────────────────────────── */
+/* Launcher-drawn screens an app can call up: the content browser (what every
+ * emulator needs to pick a game) and a message box. They take over the
+ * display and input until they return; the app's surface comes back on its
+ * next present. They return early (CANCEL) when the app is asked to exit. */
+
+#define PAPP_IF_UI        PAPP_FOURCC('U', 'I', ' ', ' ')
+#define PAPP_IF_UI_VER    2      /* v2: menu */
+
+typedef struct {
+    const char *title;           /* header, e.g. "NES"                               */
+    const char *root;            /* folder to browse, e.g. "/sd/roms/nes"             */
+    const char *extensions;      /* ".nes,.fds" (case-insensitive); NULL = all files  */
+    /* Save states: the save of ROM "<dir>/<file>" is "<save_dir>/<file><save_ext>"
+     * (extension kept: "Zelda.nes" -> "Zelda.nes.sav", as RetroESP32 did).
+     * With save_dir set, ROMs that have one offer Resume / Restart / Delete save. */
+    const char *save_dir;
+    const char *save_ext;        /* e.g. ".sav"                                       */
+    uint32_t    flags;           /* reserved, 0                                       */
+} papp_pick_cfg_t;
+
+enum {
+    PAPP_PICK_CANCEL = 0,        /* user backed out (or the app must exit)            */
+    PAPP_PICK_RUN,               /* start the ROM (it has no save)                    */
+    PAPP_PICK_RESUME,            /* start the ROM and load save_path                  */
+    PAPP_PICK_RESTART,           /* start fresh; the save stays until overwritten     */
+};
+
+typedef struct {
+    int32_t action;              /* PAPP_PICK_*                                       */
+    char    path[256];           /* the chosen ROM                                    */
+    char    save_path[256];      /* where its save state lives ("" without save_dir)  */
+} papp_pick_result_t;
+
+typedef struct {
+    papp_iface_hdr_t hdr;
+    /* Browse cfg->root: folders, Favorites and Recent tabs, search, per-ROM
+     * menu. Favorites and recents are kept by the launcher. Returns action. */
+    int  (*pick_file)(const papp_pick_cfg_t *cfg, papp_pick_result_t *out);
+    /* A message box; returns when the user dismisses it. */
+    void (*message)(const char *title, const char *text);
+    /* v2: a list of choices over the app's (dimmed) picture, e.g. an emulator's
+     * in-game menu. Returns the index picked, or -1 for back / exit request.
+     * At most 7 items. */
+    int  (*menu)(const char *title, const char *const *items, int n, int initial);
+} papp_if_ui_t;
+
 /* ── Entry point ────────────────────────────────────────────────────────── */
 
 /* Provided by the SDK runtime (crt0), located at entry_off. */

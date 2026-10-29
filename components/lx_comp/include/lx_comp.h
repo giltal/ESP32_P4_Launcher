@@ -50,6 +50,12 @@ int           lx_comp_touch_read(lx_surface_t *s, bsp_touch_point_t *pts, int ma
  * NULL while an app surface owns the display. end() flips it on screen. */
 uint16_t *lx_comp_launcher_begin(void);
 void      lx_comp_launcher_end(void);
+/* Same, but also while an app surface exists: for launcher screens the app
+ * itself called up (UI interface) while it waits for them. The app's surface
+ * reappears with its next present. Pair with lx_comp_launcher_end(). */
+uint16_t *lx_comp_takeover_begin(void);
+/* Copies what is on screen into dst (a buffer from *_begin), to draw on top of it. */
+void      lx_comp_copy_visible(uint16_t *dst);
 
 #ifdef __cplusplus
 }

@@ -259,18 +259,36 @@ int lx_comp_touch_read(lx_surface_t *s, bsp_touch_point_t *pts, int max)
     return n < 0 ? n : out;
 }
 
-uint16_t *lx_comp_launcher_begin(void)
+static uint16_t *launcher_begin(bool over_app)
 {
     if (!s_lock) return NULL;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (s_surface) {
+    if (s_surface && !over_app) {
         xSemaphoreGive(s_lock);
         return NULL;
     }
     bsp_display_wait_flip(FLIP_WAIT_MS);
     int back = bsp_display_visible() ^ 1;
-    s_fb_clean[back] = false;
+    s_fb_clean[back] = false;           /* the app's next present redraws the letterbox */
     return bsp_display_fb(back);
+}
+
+uint16_t *lx_comp_launcher_begin(void)
+{
+    return launcher_begin(false);
+}
+
+uint16_t *lx_comp_takeover_begin(void)
+{
+    return launcher_begin(true);
+}
+
+void lx_comp_copy_visible(uint16_t *dst)
+{
+    const bsp_info_t *b = bsp_info();
+    size_t bytes = (size_t)b->display_w * b->display_h * 2;
+    uint16_t *src = bsp_display_fb(bsp_display_visible());
+    if (src != dst) memcpy(dst, src, bytes);
 }
 
 void lx_comp_launcher_end(void)

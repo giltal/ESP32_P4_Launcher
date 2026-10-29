@@ -101,7 +101,8 @@ static void status_task(void *arg)
         if (down) { last_x = p[0].x; last_y = p[0].y; }
 
         int64_t now = esp_timer_get_time();
-        if (down != was_down || ((down || input_changed) && now - last_draw > 66000)) {   /* ~15 fps */
+        bool idle = lx_app_state() == LX_APP_IDLE;     /* a running app may have UI screens up */
+        if (idle && (down != was_down || ((down || input_changed) && now - last_draw > 66000))) {   /* ~15 fps */
             strcpy(prev_input, input);
             status_screen_set_input(input);
             status_screen_draw();

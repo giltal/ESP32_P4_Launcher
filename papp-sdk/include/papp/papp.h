@@ -135,6 +135,23 @@ bool          papp_queue_send(papp_queue_t *q, const void *item, uint32_t timeou
 bool          papp_queue_recv(papp_queue_t *q, void *item, uint32_t timeout_ms);
 uint32_t      papp_queue_count(papp_queue_t *q);
 
+/* ── Launcher screens ───────────────────────────────────────────────────────
+ * The content browser every emulator needs: folders, Favorites / Recent tabs,
+ * search, and Run / Resume / Restart / Delete save per ROM. It takes over the
+ * screen and input until the user picks (your surface returns on its next
+ * present). Returns CANCEL when the user backs out or the app must exit.
+ *   papp_pick_cfg_t cfg = { .title = "NES", .root = "/sd/roms/nes", .extensions = ".nes",
+ *                           .save_dir = "/sd/data/nes/saves", .save_ext = ".sav" };
+ *   papp_pick_result_t r;
+ *   if (papp_ui_pick_file(&cfg, &r) == PAPP_PICK_RESUME) load_state(r.save_path); */
+int  papp_ui_pick_file(const papp_pick_cfg_t *cfg, papp_pick_result_t *out);
+void papp_ui_message(const char *title, const char *text);
+/* A menu over your (dimmed) picture: returns the item index, or -1 when the
+ * user backs out or the app must exit. At most 7 items.
+ *   static const char *const items[] = { "Resume", "Save", "Exit" };
+ *   switch (papp_ui_menu("Game menu", items, 3, 0)) { ... } */
+int  papp_ui_menu(const char *title, const char *const *items, int n, int initial);
+
 /* ── Raw interfaces ─────────────────────────────────────────────────────── */
 extern const papp_if_sys_t *papp_if_sys(void);
 extern const papp_if_mem_t *papp_if_mem(void);
@@ -142,6 +159,7 @@ extern const papp_if_disp_t *papp_if_disp(void);   /* NULL if absent */
 extern const papp_if_audi_t *papp_if_audi(void);   /* NULL if absent */
 extern const papp_if_inpt_t *papp_if_inpt(void);   /* NULL if absent */
 extern const papp_if_thrd_t *papp_if_thrd(void);   /* NULL if absent */
+extern const papp_if_ui_t   *papp_if_ui(void);     /* NULL if absent */
 
 #ifdef __cplusplus
 }

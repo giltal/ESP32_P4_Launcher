@@ -35,6 +35,7 @@ typedef struct {
     pad_fmt_t fmt;
     int detect_count;
     uint16_t vid, pid;
+    bool waking;                    /* DS3 asleep: its wake-up press isn't HOME */
 } dev_t;
 
 static dev_t s_devs[MAX_DEVS];
@@ -194,6 +195,16 @@ static void parse_pad(dev_t *d, const uint8_t *p, int len)
         break;
     }
     }
+    /* A genuine DS3 stays silent after connecting until it is pressed once,
+     * in practice with PS (= HOME). That press wakes the pad; it must not
+     * also stop the running app. HOME counts again once PS was released. */
+    if (d->waking) {
+        if (b & PAPP_BTN_HOME) b &= ~PAPP_BTN_HOME;
+        else {
+            d->waking = false;
+            ESP_LOGI(TAG, "player %d: DS3 is awake", d->player + 1);
+        }
+    }
     lx_input_pad_update(d->player, b, lx, ly, rx, ry, lt, rt);
 }
 
@@ -268,7 +279,7 @@ static void ds3_enable(hid_host_device_handle_t h)
     esp_err_t err = hid_class_request_set_report(h, HID_REPORT_TYPE_FEATURE, 0xF4, enable, sizeof(enable));
     led[9] = 0x02;
     hid_class_request_set_report(h, HID_REPORT_TYPE_OUTPUT, 0x01, led, sizeof(led));
-    ESP_LOGI(TAG, "DS3 operational mode %s — press a button if it stays silent",
+    ESP_LOGI(TAG, "DS3 operational mode %s — it stays silent until pressed once (PS is fine)",
              err == ESP_OK ? "enabled" : "request failed");
 }
 
@@ -337,7 +348,10 @@ static void open_device(hid_host_device_handle_t h)
         product_name(h, d->vid, d->pid, name, sizeof(name));
         d->player = lx_input_pad_attach(name, d->vid, d->pid);
         if (d->player < 0) d->kind = DEV_IGNORED;           /* all player slots taken */
-        else if (d->vid == 0x054C && d->pid == 0x0268) ds3_enable(h);
+        else if (d->vid == 0x054C && d->pid == 0x0268) {
+            d->waking = true;
+            ds3_enable(h);
+        }
     } else if (d->kind == DEV_KBD) {
         lx_input_kbd_attach();
     }

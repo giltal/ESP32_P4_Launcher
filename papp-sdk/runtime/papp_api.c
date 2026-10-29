@@ -13,6 +13,7 @@ papp_import_t __papp_imports[] = {
     { PAPP_IF_AUDI, PAPP_IF_AUDI_VER, PAPP_IMPORT_OPTIONAL, 0 },
     { PAPP_IF_INPT, 1, PAPP_IMPORT_OPTIONAL, 0 },          /* v2 functions checked at call */
     { PAPP_IF_THRD, PAPP_IF_THRD_VER, PAPP_IMPORT_OPTIONAL, 0 },
+    { PAPP_IF_UI, 1, PAPP_IMPORT_OPTIONAL, 0 },              /* v2 functions checked at call */
 };
 
 #define SYS ((const papp_if_sys_t *)__papp_imports[0].iface)
@@ -22,6 +23,7 @@ papp_import_t __papp_imports[] = {
 #define AUDI ((const papp_if_audi_t *)__papp_imports[4].iface)
 #define INPT ((const papp_if_inpt_t *)__papp_imports[5].iface)
 #define THRD ((const papp_if_thrd_t *)__papp_imports[6].iface)
+#define UI   ((const papp_if_ui_t *)__papp_imports[7].iface)
 
 const papp_if_sys_t *papp_if_sys(void) { return SYS; }
 const papp_if_mem_t *papp_if_mem(void) { return MEM; }
@@ -172,3 +174,27 @@ void     papp_queue_destroy(papp_queue_t *q)                               { if 
 bool     papp_queue_send(papp_queue_t *q, const void *item, uint32_t timeout_ms) { return THRD->queue_send(q, item, timeout_ms); }
 bool     papp_queue_recv(papp_queue_t *q, void *item, uint32_t timeout_ms)       { return THRD->queue_recv(q, item, timeout_ms); }
 uint32_t papp_queue_count(papp_queue_t *q)                                 { return THRD->queue_count(q); }
+
+/* ── UI ─────────────────────────────────────────────────────────────────── */
+
+const papp_if_ui_t *papp_if_ui(void) { return UI; }
+
+int papp_ui_pick_file(const papp_pick_cfg_t *cfg, papp_pick_result_t *out)
+{
+    if (!UI) {
+        out->action = PAPP_PICK_CANCEL;
+        return PAPP_PICK_CANCEL;
+    }
+    return UI->pick_file(cfg, out);
+}
+
+void papp_ui_message(const char *title, const char *text)
+{
+    if (UI) UI->message(title, text);
+    else papp_log("%s: %s\n", title, text);
+}
+
+int papp_ui_menu(const char *title, const char *const *items, int n, int initial)
+{
+    return UI && UI->hdr.version >= 2 ? UI->menu(title, items, n, initial) : -1;
+}

@@ -23,6 +23,7 @@
 #include "lx_comp.h"
 #include "lx_audio.h"
 #include "lx_input.h"
+#include "lx_ui.h"
 
 static const char *TAG = "lx_svc";
 
@@ -349,6 +350,7 @@ static const papp_iface_hdr_t *const s_registry[] = {
     &lx_if_audi.hdr,
     &lx_if_inpt.hdr,
     &lx_if_thrd.hdr,
+    &lx_if_ui.hdr,
 };
 
 void lx_svc_init(lx_app_log_sink_t log_sink)
@@ -394,6 +396,7 @@ void lx_svc_end_run(uint32_t *leaked_allocs, uint32_t *leaked_bytes, uint32_t *l
     lx_comp_destroy_all();      /* surfaces, streams and sync objects go */
     lx_audio_close_all();       /* with the app; not counted as leaks    */
     lx_thrd_end_run();
+    lx_ui_reset();              /* a browser the app was killed in */
     *leaked_allocs = na; *leaked_bytes = nb; *leaked_files = nf;
 }
 

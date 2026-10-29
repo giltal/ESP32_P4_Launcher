@@ -13,19 +13,24 @@ launcher/                 ESP-IDF project (factory app; main.c + status_screen.c
 boards/<id>/board/        BSP implementation (component "board"); boards/<id>/sdkconfig.board
 components/bsp/           BSP contract (bsp.h) — the core only talks to hardware through it
 components/papp_abi/      papp_abi.h — .papp v2 format + interfaces (shared with apps; no IDF includes)
-components/lx_loader/     App Manager: loader, relocation, imports, services (SYS/MEM/FS/DISP/AUDI/INPT/THRD), teardown
+components/lx_loader/     App Manager: loader, relocation, imports, services (SYS/MEM/FS/DISP/AUDI/INPT/THRD/UI), teardown
 components/lx_devlink/    DevLink: framed protocol over USB-Serial-JTAG (devlink_proto.h)
 components/lx_common/     crc32, launcher version
 components/lx_gfx/        software drawing + 8x16 font for launcher screens (rotation-aware)
 components/lx_comp/       compositor: app surfaces → PPA scale/rotate → panel; launcher screens draw via it
 components/lx_audio/      audio engine: per-stream rings → resample → mix → BSP codec (fixed rate)
+components/lx_ui/         launcher-drawn screens for apps: content browser (pick_file) + message box
 components/lx_input/      input manager: USB HID gamepads/keyboards + board buttons (merged into P1) → players + event queue; HOME chord
 papp-sdk/                 App SDK: include/papp/papp.h, runtime/ (crt0, libc glue), ld/papp.ld,
                           tools/papp_build.py, tools/papp_pack.py
 apps/                     Test/demo apps (hello, libc_test, gfx_demo: DISP test, args w h mode secs bufs;
                           audio_test: AUDI test, args mix|cycles|block; input_test: INPT event log, arg secs;
                           thread_test: THRD test (--libc), args all|leave|exit|spin;
-                          fast_bench: PSRAM vs FAST (internal SRAM) placement benchmark, arg rounds)
+                          fast_bench: PSRAM vs FAST (internal SRAM) placement benchmark, arg rounds;
+                          browse_test: UI browser test, args root exts save_dir picks;
+                          nes/: NES emulator (nofrendo), build with `python apps
+esuild.py`,
+                          no args = ROM browser, or `-- <rom> [resume]`)
 tools/papp_dev.py         DevLink host tool
 tests/host/test_reloc.py  Host relocation equivalence test
 ```
