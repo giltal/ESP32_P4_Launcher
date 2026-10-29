@@ -1,0 +1,22 @@
+menu "Launcher: app loader"
+
+    config LX_APP_TEST_BASE_SHIFT_PAGES
+        int "Test: shift the app exec mapping by N 64 KB pages"
+        range 0 64
+        default 0
+        help
+            Test aid for relocation. Maps N dummy pages before the app's executable
+            alias so apps run at a different address than 0x4A000000. Keep 0 in
+            normal builds.
+
+    config LX_APP_FAST_MAX_KB
+        int "Largest FAST region (internal SRAM) an app may use, KB"
+        range 0 512
+        default 192
+        help
+            Code and data an app tags PAPP_FAST / PAPP_FAST_DATA / PAPP_FAST_BSS are
+            loaded into executable internal SRAM, up to this size. Bigger FAST regions,
+            or a launcher without executable SRAM (ESP_SYSTEM_PMP_IDRAM_SPLIT=y), put
+            them in PSRAM with the rest of the app (correct, just slower). 0 = never.
+
+endmenu

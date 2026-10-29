@@ -1,0 +1,32 @@
+# ESP32-P4 Launcher — board-independent defaults (board fragment: boards/<id>/sdkconfig.board)
+CONFIG_IDF_TARGET="esp32p4"
+
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# UART0 is the console; USB-Serial-JTAG belongs to DevLink (no plain-text console on it)
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# PSRAM via heap_caps and malloc (large blocks)
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# FATFS long file names
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+
+# Crash reports: core dump to flash (ELF) — read back by DevLink CRASH
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# FAST region (ARCHITECTURE §5.3, Spike B / ADR D3): app code tagged PAPP_FAST runs from
+# internal SRAM, which needs heap SRAM to be executable (MALLOC_CAP_EXEC). Costs the
+# PMP split between launcher code and data (no W^X for internal RAM).
+CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n

@@ -1,0 +1,9 @@
+# ESP32-P4 Launcher — 16 MB flash
+# factory = launcher; ota_0/ota_1 = launcher self-update (A/B); coredump = crash reports for DevLink.
+# Name,    Type, SubType,  Offset,   Size
+nvs,       data, nvs,      0x9000,   0x6000
+otadata,   data, ota,      0xF000,   0x2000
+factory,   app,  factory,  0x20000,  0x300000
+ota_0,     app,  ota_0,    0x320000, 0x300000
+ota_1,     app,  ota_1,    0x620000, 0x300000
+coredump,  data, coredump, 0x920000, 0x40000
