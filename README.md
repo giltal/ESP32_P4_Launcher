@@ -528,9 +528,22 @@ Further reading:
 This project grew out of [RetroESP32-P4](https://github.com/giltal/RetroESP32-P4), the reference for its drivers
 and ports. The launcher UI uses [LVGL](https://lvgl.io).
 
-The emulators and game engines are the work of their own authors and keep their own licenses, which differ from
-one another. Check each one before redistributing, starting with the license files in its folder under `apps/`,
-such as `apps/doom/prboom/COPYING`, `apps/genesis/core/LICENSE` and `apps/a26/core/license.txt`.
+This project's original code (launcher, SDK, tools, compatibility layers and board support) is released under
+the [MIT License](LICENSE).
 
-This repository doesn't have a top-level license file yet. Game names, logos and screenshots belong to their
-respective owners, and no game data is included.
+The emulators and game engines under `apps/` are the work of their own authors and **are not covered by the MIT
+license**. They keep their own licenses, which differ from one another:
+
+| Code | License |
+|---|---|
+| Most cores and engines, such as nofrendo, prboom, stella, atari800 and WinQuake | GPL or LGPL, see the notices in each source folder |
+| gwenesis (Genesis) | AGPLv3, see `apps/genesis/core/LICENSE` |
+| snes9x (SNES) | Its own non-commercial license, see `apps/snes/core/snes9x/LICENSE` |
+| MAME-derived Z80 code (`apps/sms/core/cpu/z80.c`, `apps/neogeo/core/mamez80/z80.c`) | Non-commercial terms in the file header |
+| Chocolate Duke3D | See the `LICENSE` files under `apps/duke3d/duke3d/` |
+
+A `.papp` built with one of these components has to follow that component's license too, so check it before
+redistributing a built app. Some of these terms rule out commercial use. Your own apps built on the SDK are
+not affected by them.
+
+Game names, logos and screenshots belong to their respective owners, and no commercial game data is included.
