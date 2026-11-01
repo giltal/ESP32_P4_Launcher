@@ -389,8 +389,10 @@ esp_err_t lx_app_launch(const char *path, int argc, const char *const *argv,
 
     FILE *f = fopen(path, "rb");
     if (!f) { free(a); return fail(err, err_len, ESP_ERR_NOT_FOUND, "cannot open %s", path); }
+    void *iobuf = lx_file_fast_io(f);
     esp_err_t e = load_image(a, f, err, err_len);
     fclose(f);
+    heap_caps_free(iobuf);
     if (e != ESP_OK) { app_free(a); return e; }
 
     const papp_manifest_t *mf = app_manifest(a);

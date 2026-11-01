@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include "papp_abi.h"
 #include "lx_app.h"
 
@@ -15,6 +16,8 @@ const papp_iface_hdr_t *lx_svc_find(uint32_t id, uint16_t min_version);
 void     lx_svc_begin_run(void);
 void     lx_svc_end_run(uint32_t *leaked_allocs, uint32_t *leaked_bytes, uint32_t *leaked_files);
 void     lx_svc_request_exit(void);
+#define LX_FILE_BUF_SIZE (16 * 1024)
+void    *lx_file_fast_io(FILE *f);  /* DMA-aligned stdio buffer, free after fclose */
 uint32_t lx_svc_busy(void);   /* >0 while the app is inside a service call */
 
 /* Every service entry point brackets its work with these (see lx_services.c). */

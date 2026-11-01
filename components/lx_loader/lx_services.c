@@ -114,18 +114,25 @@ static bool track_remove(void *ptr)
 
 #define MAX_FILES 32
 static FILE *s_files[MAX_FILES];
+static void *s_file_bufs[MAX_FILES];
+
+/* SD reads into a buffer that isn't DMA-aligned go one sector at a time through
+ * a bounce buffer (1.5 MB/s instead of 15), and stdio's own buffer isn't aligned.
+ * The buffer must outlive the file: free it after fclose. NULL keeps the default. */
+void *lx_file_fast_io(FILE *f)
+{
+    void *buf = heap_caps_aligned_alloc(64, LX_FILE_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+    if (buf && setvbuf(f, buf, _IOFBF, LX_FILE_BUF_SIZE) != 0) {
+        heap_caps_free(buf);
+        buf = NULL;
+    }
+    return buf;
+}
 
 static bool file_track(FILE *f)
 {
     for (int i = 0; i < MAX_FILES; i++)
-        if (!s_files[i]) { s_files[i] = f; return true; }
-    return false;
-}
-
-static bool file_untrack(FILE *f)
-{
-    for (int i = 0; i < MAX_FILES; i++)
-        if (s_files[i] == f) { s_files[i] = NULL; return true; }
+        if (!s_files[i]) { s_files[i] = f; s_file_bufs[i] = lx_file_fast_io(f); return true; }
     return false;
 }
 
@@ -265,7 +272,15 @@ static int fs_close(papp_file_t *f)
 {
     if (!f) return -1;
     SVC_ENTER();
-    int r = file_untrack((FILE *)f) ? fclose((FILE *)f) : -1;
+    int r = -1;
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (s_files[i] != (FILE *)f) continue;
+        r = fclose((FILE *)f);
+        heap_caps_free(s_file_bufs[i]);
+        s_files[i] = NULL;
+        s_file_bufs[i] = NULL;
+        break;
+    }
     SVC_LEAVE();
     return r;
 }
@@ -374,6 +389,7 @@ void lx_svc_begin_run(void)
     lx_input_flush();           /* the app sees only input from its own run */
     lx_svc_busy_count = 0;
     memset(s_files, 0, sizeof(s_files));
+    memset(s_file_bufs, 0, sizeof(s_file_bufs));
     s_ptrs = NULL; s_ptr_cap = 0; s_ptr_used = 0; s_ptr_live = 0;
 }
 
@@ -391,7 +407,13 @@ void lx_svc_end_run(uint32_t *leaked_allocs, uint32_t *leaked_bytes, uint32_t *l
     s_ptrs = NULL; s_ptr_cap = 0; s_ptr_used = 0; s_ptr_live = 0;
 
     for (int i = 0; i < MAX_FILES; i++) {
-        if (s_files[i]) { fclose(s_files[i]); s_files[i] = NULL; nf++; }
+        if (s_files[i]) {
+            fclose(s_files[i]);
+            heap_caps_free(s_file_bufs[i]);
+            s_files[i] = NULL;
+            s_file_bufs[i] = NULL;
+            nf++;
+        }
     }
     lx_comp_destroy_all();      /* surfaces, streams and sync objects go */
     lx_audio_close_all();       /* with the app; not counted as leaks    */

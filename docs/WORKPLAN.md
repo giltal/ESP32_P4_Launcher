@@ -7,7 +7,7 @@
 
 ---
 
-## Status (2026-11-01, launcher 0.11.0: DISP v3 `present_ext`, zero-copy frames for V1 games and emulators)
+## Status (2026-11-01, launcher 0.12.0: DISP v3 `present_ext`, zero-copy frames, DMA-aligned file buffers)
 
 | Item | State | Evidence |
 |---|---|---|
@@ -40,6 +40,115 @@
 
 Known gaps: internal RAM is executable and writable (PMP split off for FAST, no W^X); PPA scale is quantised to 1/16, so STRETCH can leave a few pixels (160x100 → 800x475); a worker thread at PAPP_PRIO_HIGH spinning on core 1 can starve DevLink (prio 4) while it runs (HOME still stops it); `deploy` doesn't
 yet notice a device reboot (it waits for the timeout); MEM `realloc` drops alignment.
+
+---
+
+## Next development plan (2026-11-01)
+
+Sizes: **S** = up to 2 days, **M** = about a week, **L** = 2+ weeks. They are rough until each spike is done.
+New services follow the existing rules: interfaces are appended and versioned, apps never touch hardware.
+
+### Key findings
+
+- **USB pads:** `lx_input` already uses the reference's method (VID/PID + report-shape detection, one fixed
+  generic layout). It handles pads shaped like the known ones. Anything else gets wrong buttons, and XInput pads
+  (most Xbox-style pads) aren't HID, so neither project can see them. "Any pad" needs more than the reference has.
+- **Wi-Fi / BLE:** the ESP32-P4 has no radio, and the reference never implemented either. This board has an
+  ESP32-C6, confirmed working in spike C0 (below), so Milestone C is no longer blocked.
+- **BLE pads:** the C6 is BLE only, so Classic Bluetooth pads (DS3, DS4, DualSense, Switch Pro) can't connect this
+  way. BLE HID pads should work (needs confirming per pad).
+- **OTA:** `ota_0` / `ota_1` (3 MB each, launcher is 1.06 MB) are already in the partition table, unused.
+- **Battery:** only "GPIO 53" is noted. The divider ratio and charge curve are unknown.
+
+### Milestone A — Input and power (no radio needed)
+
+| # | Item | Size | Notes |
+|---|---|---|---|
+| A1 | HID report descriptor parser | M | Reads each pad's real layout, so most HID pads work first time. Current detection stays as a fallback for known pads |
+| A2 | Button mapping screen + per-pad storage | M | Settings → Controllers: press each button, saved by VID:PID on SD. The final answer for odd pads. Includes a live test view |
+| A3 | XInput support | M | USB vendor-class driver for Xbox-style pads |
+| A4 | Pad hot-plug and player assignment | S | Reconnect keeps the player slot; Settings shows who is who |
+| A5 | Diagnose the USB HID task abort | S | Seen once, unexplained. Do this before A1 touches the same code |
+| A6 | Battery level | S–M | BSP `bsp_battery_read`, `BSP_CAP_BATTERY`, home screen icon, low-battery warning, SYS interface. Needs a measured voltage-to-percent curve |
+
+### Milestone B — Files and home screen (no radio needed)
+
+| # | Item | Size | Notes |
+|---|---|---|---|
+| B1 | Home screen folders | M | Group apps (Emulators, Games, Tools). Proposal: a `category` manifest field plus user folders |
+| B2 | File browser | M | Proposal: a PAPP. Browse, rename, delete, copy, view text and images, launch a ROM in its emulator. Needs an "open with" file association |
+| B3 | File associations | S | Manifest list (`.nes`, `.sfc`, …), which B2 and any future library use |
+| B4 | Clock | S–M | See "Clock" below |
+| B5 | Sleep and power | M | Dim and sleep on idle, wake on button. Matters once A6 shows battery life |
+
+**Clock: both, split by job.** Time itself belongs to the launcher: the home screen needs it, and NTP, time zone
+and any RTC must not depend on an app. A full Clock (alarm, timer, stopwatch, big-screen face) should be a
+**PAPP**: it needs nothing special, updates independently, and proves the SDK on a real non-game app. Alarms
+would only ring while it runs unless the launcher later gets an alarm service. Without NTP or a backed-up RTC
+the clock is lost at power-off, so check whether the board has an RTC.
+
+### Milestone C — Radio
+
+| # | Item | Size | Notes |
+|---|---|---|---|
+| C0 | **Spike: radio bring-up: done 2026-11-01** | — | See results below |
+| C0b | Match host and C6 firmware | S | The C6 has 2.0.17, `esp_hosted` 3.0.10 warns of a major mismatch. Pin a 2.x host, or update the C6 from the P4 (which also needs testing). Check whether its firmware includes BLE |
+| C1 | Wi-Fi service + Settings | M | Scan, password entry on the on-screen keyboard, saved networks, status icon |
+| C2 | NTP + time zone | S | Set after connecting; Settings picks the zone |
+| C3 | NET interface for apps | M–L | Optional sockets for PAPPs, tracked for teardown. Only when an app needs it |
+| C4 | BLE HID controllers | L | NimBLE on the P4 through the C6, pairing screen, feeds `lx_input` as another pad source. Reuses A1 and A2, so it comes after them |
+| C5 | Radio during games | S–M | Measure the frame and audio cost. Likely default: radio off while an app runs, unless the app asks for it |
+
+**C0 results** (standalone test project, launcher unchanged):
+
+| Check | Result |
+|---|---|
+| Wiring | Espressif defaults work: SDIO 4-bit 40 MHz, CLK 18, CMD 19, D0-D3 14-17, reset GPIO 54 (slot 1) |
+| C6 | Detected, chip id 0x0d, hosted firmware 2.0.17 |
+| Wi-Fi | `esp_wifi_remote` init and start OK, scan found 2 networks |
+| SD with radio | Shares the SDMMC host and mounts fine (slot 0). Read speed unchanged: 1,499 KB/s idle, 1,483 KB/s scanning, worst 32 KB block 22 ms either way |
+| Not tested | Connecting, real network traffic (needs credentials), BLE, frame-rate impact in games |
+
+### Milestone D — Updates
+
+| # | Item | Size | Notes |
+|---|---|---|---|
+| D1 | Update from SD | S | Firmware file on the card → `ota_0/1`. Needs no radio, and is the recovery path for D2 |
+| D2 | App rollback safety | S | Boot-confirm and automatic rollback, with factory as the last resort |
+| D3 | OTA from GitHub Releases | M | Read `latest.json` over HTTPS, compare versions, download, check SHA-256, flash. Needs C1 |
+| D4 | CI release builds | M | GitHub Actions builds the launcher and apps, then publishes a release |
+| D5 | Signed updates | M | Verify a signature, not just a hash. Do it before promoting OTA widely |
+| D6 | App updates / catalog | M | Same manifest also lists `.papp` files. Respect each core's license when publishing binaries |
+
+### Suggested additions
+
+| Item | Size | Why |
+|---|---|---|
+| Launcher in-game overlay | M | One HOME menu for every app: volume, brightness, screenshot, quit. Replaces per-app touch edges |
+| Wi-Fi file manager (web page) | M | Upload ROMs from a phone or PC without removing the SD card. Needs C1, and may be the best use of Wi-Fi |
+| Game library with cover art | L | Browse games across systems, using `.papp` associations (B3) |
+| Screenshot button | S | Save to SD from anywhere; DevLink already has the capture code |
+| DevLink over Wi-Fi | S–M | Develop without the cable |
+| Automated regression run | M | The scripts from the test passes as `tests/board/`, run per release. Would have caught the forced-stop bug |
+| Conformance test app | M | Exercises every interface, for new boards (Phase 8) |
+| HDMI board support | M | The reference has it, and it is the first real test of board portability |
+| L2 cache size experiment | S | May speed up Quake and others, at a cost in internal RAM |
+| ~~Investigate SD speed~~ | done | Fixed in 0.12.0. Cause: stdio buffers aren't DMA-aligned, so SD reads ran one sector at a time. Raw card 18.7 MB/s, `read()` aligned 15.4 MB/s, unaligned 1.6 MB/s. Now each file has a 16 KB aligned buffer: sequential reads 1.5 -> 11.5 MB/s, 256-byte writes 0.28 -> 5.5 MB/s, Quake image read 270 -> 50 ms, Neo Geo load 17 -> 10.7 s. Random 512-byte reads got slower (1.5 -> 3.6 ms), and nothing is known to depend on them |
+| Save sync over Wi-Fi | L | Later, once Wi-Fi is stable |
+
+### Suggested order
+
+1. **Now:** finish hands-on testing, then A5, D1, D2, C0b.
+2. **Input:** A1, A2, A4, A3.
+3. **Everyday features:** A6, B3, B1, B2, B4, overlay.
+4. **Radio:** C1, C2, C5, D3, Wi-Fi file manager, C4, D4, D5.
+
+### Open decisions
+
+- What "folders" means: grouping on the home screen (assumed in B1), or something else?
+- Is there a battery fitted, and which cell?
+- Which BLE pads matter most? This decides how much of C4 is worth building.
+- Is the radio allowed to run during games?
 
 ---
 

@@ -1,4 +1,4 @@
-# Hands-on test checklist — emulators and games (launcher 0.11.0)
+# Hands-on test checklist — emulators and games (launcher 0.12.0)
 
 Fill in each cell with ✅ / ❌ (+ a short note). Start every app from the home screen.
 HOME on the pad (or Select+Start held 1 s) force-stops any app; use it only if the app's own exit fails.
@@ -54,7 +54,7 @@ USB HID host task while GBC ran (cause not known yet).
 | Lynx | ✅ Battle Wheels | ✅ 59.3 fps | stream ✅ 0/20 s | START ✅ (injected); rest by hand | ✅ (drawn on black) | ✅ | ✅ Load state | Y steps volume (brief indicator) | ✅ | |
 | Genesis | ✅ Aladdin | ✅ emulates 60 fps, draws ~54 (frame skip) | stream ✅ 6/20 s | by hand | touch: by hand | by hand | by hand | touch: by hand | by hand | |
 | SNES | ✅ ActRaiser | ✅ emulates 60 fps, draws ~35 (frame skip) | stream ✅ 8/20 s | by hand | touch: by hand | by hand | by hand | touch: by hand | by hand | |
-| Neo Geo | ✅ Metal Slug (15 s load) | ✅ 60 fps with frame skip | stream ✅ | by hand | touch: by hand | by hand | by hand | touch: by hand | by hand | first run of a big game builds its sprite cache (slow) |
+| Neo Geo | ✅ Metal Slug (11 s load) | ✅ 60 fps with frame skip | stream ✅ | by hand | touch: by hand | by hand | by hand | touch: by hand | by hand | first run of a big game builds its sprite cache (slow) |
 | Doom | ✅ demo | ✅ 33 fps | stream ✅ 0/25 s | START ✅; Y = automap | ✅ X opens / closes | by hand | — | — | ✅ hold X 3 s | |
 | OpenTyrian | ✅ title | ✅ | stream ✅ 1/25 s | by hand | X on the title menu = quit (Esc) | by hand | — | ✅ | ✅ hold X 3 s (and X on title) | |
 | Quake | ✅ demo | ✅ 20.2 fps timedemo (original ~21) | stream ✅ 1/25 s | START opens menu ✅ | touch: by hand | by hand | — | touch: by hand | touch: by hand (HOME works) | |

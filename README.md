@@ -13,7 +13,7 @@ Duke Nukem 3D and OpenTyrian.
 
 | Launcher version | App ABI | Toolchain | First board |
 |---|---|---|---|
-| 0.11.0 | 2.0-preview | ESP-IDF v5.5.2 | Guition ESP32-P4 4.3" (480×800) |
+| 0.12.0 | 2.0-preview | ESP-IDF v5.5.2 | Guition ESP32-P4 4.3" (480×800) |
 
 > **Status: active development.** The ABI is a preview and may still change. Everything below describes
 > what exists in the code today; the plan for what comes next is in [docs/WORKPLAN.md](docs/WORKPLAN.md).
@@ -371,7 +371,7 @@ Two compatibility layers let large existing code build unchanged:
 8. **Run:** create the app's task, run constructors and call `main()`.
 9. **Tear down:** on exit, stop remaining threads and reclaim memory, files and surfaces.
 
-Quake, for example, loads in about 300 ms (read 270 ms, relocate 30 ms for 2,332 relocations).
+Quake, for example, loads in about 70 ms (read 50 ms, relocate 20 ms for 2,332 relocations).
 
 An app can also return `PAPP_EXIT_RELAUNCH` to be restarted fresh with no arguments. That's how an emulator's
 **Exit game** returns to its ROM browser.
@@ -440,7 +440,7 @@ Touch can't be injected, so touch paths still need a person.
 
 ## Performance
 
-Measured on the reference board with launcher 0.11.0. **FPS** means finished frames reaching the display per
+Measured on the reference board with launcher 0.11.0, and Neo Geo with 0.12.0. **FPS** means finished frames reaching the display per
 second of real time. Quake's figure comes from its own `timedemo demo1`.
 
 | App | Frames on screen | Audio underruns | Notes |
@@ -451,11 +451,15 @@ second of real time. Quake's figure comes from its own `timedemo demo1`.
 | Atari 7800 | ~30 fps | 2 in 20 s | Draws every second frame, as the original core does |
 | Genesis | ~54 fps | 6 in 20 s | Emulates at 60, skips some frames when drawing |
 | SNES | ~35 fps | 8 in 20 s | Emulates at 60, skips frames when drawing |
+| Neo Geo | ~32 fps | not measured | Metal Slug, about 11 s to load |
 | Duke Nukem 3D | ~41 fps in E1L1, 52 in menus | low | Software renderer |
 | Doom | ~33 fps | 0 | Software renderer |
 | Quake | ~20 fps | 1 | `timedemo demo1`, software renderer |
 
 Each present costs about 5 ms of PPA time. Frames go to the PPA without a copy (`present_ext`).
+
+SD reads reach about 11.5 MB/s through the launcher's file service. Every open file gets a 16 KB DMA-aligned
+buffer, because reads into an unaligned buffer fall back to one sector at a time, at about 1.5 MB/s.
 
 ## Porting to another board
 

@@ -77,6 +77,8 @@ Input without touching the board: `input state [--watch 10]`, `input pad A+START
 - New interface functions are **appended** and the interface version bumped; breaking change = new id.
 - Every service entry point uses `SVC_ENTER/SVC_LEAVE` (forced stop waits for it) and tracks what it
   creates so teardown can reclaim it.
+- SD transfers need 64-byte-aligned DMA buffers, or they run a sector at a time at 1.5 MB/s: launcher code that
+  reads whole files uses `lx_file_fast_io` (free its buffer after `fclose`).
 - `CONFIG_LX_APP_TEST_BASE_SHIFT_PAGES` must be 0 in normal builds (relocation test aid).
 - `ESP_SYSTEM_PMP_IDRAM_SPLIT` stays off (FAST region needs executable heap SRAM). After copying an
   sdkconfig file back, touch it: an old timestamp makes the build silently keep the previous config.
