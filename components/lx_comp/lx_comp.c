@@ -31,7 +31,7 @@ struct lx_surface {
     lx_rect_t dst;                /* landscape rect on the display */
     float sx, sy;                 /* quantised PPA scale factors   */
     uint32_t frames;
-    int64_t  t_first, t_ppa;      /* stats */
+    int64_t  t_first, t_ppa, t_wait;   /* stats */
 };
 
 static SemaphoreHandle_t s_lock;
@@ -146,9 +146,9 @@ static void destroy_locked(lx_surface_t *s)
 {
     if (s->frames > 1) {
         int64_t dt = esp_timer_get_time() - s->t_first;
-        ESP_LOGI(TAG, "surface %dx%d: %lu frames, %.1f fps, PPA %.2f ms/frame", s->w, s->h,
+        ESP_LOGI(TAG, "surface %dx%d: %lu frames, %.1f fps, PPA %.2f + flip wait %.2f ms/frame", s->w, s->h,
                  (unsigned long)s->frames, (s->frames - 1) * 1e6 / (dt ? dt : 1),
-                 s->t_ppa / 1000.0 / s->frames);
+                 s->t_ppa / 1000.0 / s->frames, s->t_wait / 1000.0 / s->frames);
     }
     for (int i = 0; i < s->nbuf; i++) heap_caps_free(s->buf[i]);
     heap_caps_free(s);
@@ -183,7 +183,7 @@ lx_rect_t lx_comp_surface_rect(const lx_surface_t *s)
     return s->dst;
 }
 
-esp_err_t lx_comp_present(lx_surface_t *s)
+static esp_err_t present_pixels(lx_surface_t *s, const void *pixels)
 {
     if (!s || !s_lock) return ESP_ERR_INVALID_ARG;
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -193,7 +193,9 @@ esp_err_t lx_comp_present(lx_surface_t *s)
     }
 
     const bsp_info_t *b = bsp_info();
+    int64_t t_w = esp_timer_get_time();
     bsp_display_wait_flip(FLIP_WAIT_MS);
+    s->t_wait += esp_timer_get_time() - t_w;
     int back = bsp_display_visible() ^ 1;
     uint16_t *fb = bsp_display_fb(back);
     size_t fb_bytes = (size_t)b->display_w * b->display_h * 2;
@@ -211,7 +213,7 @@ esp_err_t lx_comp_present(lx_surface_t *s)
                                                              PPA_SRM_ROTATION_ANGLE_0;
     ppa_srm_oper_config_t op = {
         .in = {
-            .buffer = s->buf[s->cur],
+            .buffer = pixels ? pixels : s->buf[s->cur],
             .pic_w = s->w, .pic_h = s->h,
             .block_w = s->w, .block_h = s->h,
             .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
@@ -235,12 +237,22 @@ esp_err_t lx_comp_present(lx_surface_t *s)
         bsp_display_show(back);
         if (s->frames++ == 0) s->t_first = t1;
         s->t_ppa += t1 - t0;
-        s->cur = (s->cur + 1) % s->nbuf;
+        if (!pixels) s->cur = (s->cur + 1) % s->nbuf;
     } else {
         ESP_LOGE(TAG, "PPA SRM failed: %s", esp_err_to_name(err));
     }
     xSemaphoreGive(s_lock);
     return err;
+}
+
+esp_err_t lx_comp_present(lx_surface_t *s)
+{
+    return present_pixels(s, NULL);
+}
+
+esp_err_t lx_comp_present_ext(lx_surface_t *s, const void *pixels)
+{
+    return pixels ? present_pixels(s, pixels) : ESP_ERR_INVALID_ARG;
 }
 
 esp_err_t lx_comp_launcher_present(const uint16_t *frame)

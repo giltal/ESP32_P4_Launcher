@@ -6,6 +6,8 @@ papp_build.py — compile, link and pack a PAPP app with the bare riscv32-esp-el
   python papp-sdk/tools/papp_build.py --name libc_test --src apps/libc_test/main.c --libc
 
 Output: build/apps/<name>/<name>.papp (+ .elf, .map). No ESP-IDF project needed.
+An icon.png next to the first source file is copied to build/apps/<name>/ too
+(shown on the launcher home screen at 88x88; deploy uploads it with the app).
 (Interim driver until the CMake toolchain of WORKPLAN Phase 4.2.)
 """
 
@@ -13,6 +15,7 @@ import argparse
 import glob
 import os
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -52,8 +55,32 @@ def run(cmd):
         sys.exit(f"papp_build: command failed: {' '.join(cmd[:3])} ...")
 
 
+ICON_SIZE = 88       # what the home screen shows; other sizes are scaled to it
+
+
+def copy_icon(src_dir, out_dir):
+    """icon.png beside the sources -> build dir, with a size sanity check."""
+    icon = os.path.join(src_dir, "icon.png")
+    if not os.path.isfile(icon):
+        return
+    with open(icon, "rb") as f:
+        head = f.read(24)
+    if head[:8] != b"\x89PNG\r\n\x1a\n":
+        print(f"papp_build: warning: {icon} is not a PNG, skipped", file=sys.stderr)
+        return
+    w, h = struct.unpack(">II", head[16:24])
+    if w != h or max(w, h) > 4 * ICON_SIZE:
+        print(f"papp_build: warning: {icon} is {w}x{h}; {ICON_SIZE}x{ICON_SIZE} (square) is best "
+              "(it is decoded at full size and kept in memory)", file=sys.stderr)
+    shutil.copyfile(icon, os.path.join(out_dir, "icon.png"))
+
+
 def build(name, sources, includes=(), libc=False, out_dir=None, link_base=0, extra_cflags=(),
-          fast_link_base=0):
+          fast_link_base=0, libc_glue=True, app_cflags=(), per_file_cflags=None, extra_ldflags=(),
+          icon_dir=None, jobs=None, extra_libs=()):
+    """extra_cflags: every file; app_cflags: the app's sources only (not the SDK
+    runtime); per_file_cflags: {source: [flags]} appended last. libc_glue=False
+    links newlib without the SDK's libc_glue.c (the app brings its own)."""
     gcc = find_tool("riscv32-esp-elf-gcc")
     out_dir = out_dir or os.path.join(ROOT, "build", "apps", name)
     obj_dir = os.path.join(out_dir, "obj")
@@ -61,17 +88,29 @@ def build(name, sources, includes=(), libc=False, out_dir=None, link_base=0, ext
 
     rt = os.path.join(SDK, "runtime")
     runtime = [os.path.join(rt, "crt0.c"), os.path.join(rt, "papp_api.c")]
-    runtime.append(os.path.join(rt, "libc_glue.c" if libc else "mini_libc.c"))
+    if libc and libc_glue:
+        runtime.append(os.path.join(rt, "libc_glue.c"))
+    elif not libc:
+        runtime.append(os.path.join(rt, "mini_libc.c"))
 
     cflags = CFLAGS + ["-I" + i for i in includes] + list(extra_cflags)
     if not libc:
         cflags += ["-ffreestanding", "-fno-tree-loop-distribute-patterns"]
 
-    objs = []
-    for src in runtime + list(sources):
-        obj = os.path.join(obj_dir, os.path.splitext(os.path.basename(src))[0] + ".o")
-        run([gcc] + cflags + ["-c", src, "-o", obj])
-        objs.append(obj)
+    per_file_cflags = per_file_cflags or {}
+    jobs_list = []
+    for i, src in enumerate(runtime + list(sources)):
+        # unique object names: engines reuse file names in different folders
+        obj = os.path.join(obj_dir, f"{i:04d}_" + os.path.splitext(os.path.basename(src))[0] + ".o")
+        flags = cflags + (list(app_cflags) if src not in runtime else []) + per_file_cflags.get(src, [])
+        jobs_list.append(([gcc] + flags + ["-c", src, "-o", obj], obj))
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=jobs or os.cpu_count() or 4) as pool:
+        codes = list(pool.map(lambda j: subprocess.run(j[0]).returncode, jobs_list))
+    failed = [j[0][-3] for j, c in zip(jobs_list, codes) if c]
+    if failed:
+        sys.exit(f"papp_build: {len(failed)} file(s) failed to compile, e.g. {failed[0]}")
+    objs = [o for _, o in jobs_list]
 
     ld_script = os.path.join(SDK, "ld", "papp.ld")
     if link_base or fast_link_base:
@@ -86,11 +125,11 @@ def build(name, sources, includes=(), libc=False, out_dir=None, link_base=0, ext
                       "-Wl,-q", "-Wl,--no-warn-rwx-segments", "-Wl,-Map=" + elf[:-4] + ".map"]
     if libc:
         ldflags += ["-nodefaultlibs"] + ["-Wl,--wrap=" + w for w in WRAPS]
-        libs = ["-Wl,--start-group", "-lc", "-lm", "-lgcc", "-Wl,--end-group"]
+        libs = ["-Wl,--start-group", "-lc", "-lm", "-lgcc"] + list(extra_libs) + ["-Wl,--end-group"]
     else:
         ldflags += ["-nostdlib"]
         libs = ["-lgcc"]
-    run([gcc] + ldflags + ["-o", elf] + objs + libs)
+    run([gcc] + ldflags + list(extra_ldflags) + ["-o", elf] + objs + libs)
 
     if link_base or fast_link_base:
         return elf, None
@@ -100,6 +139,7 @@ def build(name, sources, includes=(), libc=False, out_dir=None, link_base=0, ext
         open(papp, "wb").write(papp_pack.serialize(img))
     except papp_pack.PackError as e:
         sys.exit(f"papp_pack: error: {e}")
+    copy_icon(icon_dir or os.path.dirname(os.path.abspath(sources[0])), out_dir)
     print(f"{name}: {papp} (image {len(img.image):,} B, bss {img.bss_size:,} B, "
           f"{len(img.relocs)} relocs, {img.imports_count} imports"
           + (f", FAST {len(img.fast):,} B + bss {img.fast_bss_size:,} B" if img.fast or img.fast_bss_size else "")

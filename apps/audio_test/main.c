@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-PAPP_MANIFEST(.id = "test.audio", .name = "Audio test", .version = "0.1.0", .main_stack = 16384);
+PAPP_MANIFEST(.id = "test.audio", .name = "Audio test", .version = "0.1.0", .main_stack = 16384, .flags = PAPP_MF_HIDDEN);
 
 #define NSTREAMS 4
 #define CHUNK_MS 10

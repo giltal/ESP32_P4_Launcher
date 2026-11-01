@@ -406,6 +406,9 @@ def cmd_deploy(dl, args, exit_box):
         dl.request(STOP, struct.pack("<I", 1000))
         time.sleep(1.5)
     dl.put(args.file, remote)
+    icon = os.path.join(os.path.dirname(os.path.abspath(args.file)), "icon.png")
+    if os.path.isfile(icon):                       # home screen icon (papp_build copies it here)
+        dl.put(icon, remote.rsplit("/", 1)[0] + "/icon.png")
 
     done = threading.Event()
 
@@ -441,6 +444,10 @@ def cmd_deploy(dl, args, exit_box):
 
 
 def main():
+    # App logs may hold any character; a piped Windows console is cp1252 and would raise
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description="DevLink host tool")
     ap.add_argument("--port")
     sub = ap.add_subparsers(dest="cmd", required=True)

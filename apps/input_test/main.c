@@ -9,7 +9,7 @@
 #include "papp/papp.h"
 #include <stdlib.h>
 
-PAPP_MANIFEST(.id = "test.input", .name = "Input test", .version = "0.1.0", .main_stack = 8192);
+PAPP_MANIFEST(.id = "test.input", .name = "Input test", .version = "0.1.0", .main_stack = 8192, .flags = PAPP_MF_HIDDEN);
 
 static const char *const s_btn[20] = {
     "A", "B", "X", "Y", "L1", "R1", "L2", "R2", "SELECT", "START", "L3", "R3", "HOME", "MISC",

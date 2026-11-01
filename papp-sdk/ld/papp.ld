@@ -60,6 +60,7 @@ SECTIONS
         __bss_start = .;
         *(.sbss .sbss.*)
         *(.bss .bss.*)
+        *(.ext_ram.bss .ext_ram.bss.*)                       /* ESP-IDF PSRAM bss: apps live in PSRAM anyway */
         *(COMMON)
         . = ALIGN(16);
         __bss_end = .;

@@ -11,7 +11,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
-PAPP_MANIFEST(.id = "test.libc", .name = "libc test", .version = "0.1.0", .main_stack = 16384);
+PAPP_MANIFEST(.id = "test.libc", .name = "libc test", .version = "0.1.0", .main_stack = 16384, .flags = PAPP_MF_HIDDEN);
 
 static int s_failures;
 static int s_ctor_ran;

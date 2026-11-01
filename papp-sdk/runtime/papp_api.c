@@ -64,6 +64,7 @@ papp_surface_t *papp_disp_surface_create(const papp_surface_cfg_t *cfg)
 
 void  papp_disp_surface_destroy(papp_surface_t *s)            { DISP->surface_destroy(s); }
 void *papp_disp_lock(papp_surface_t *s, int *stride_px)       { return DISP->lock(s, stride_px); }
+int   papp_disp_present_ext(papp_surface_t *s, const void *pixels) { return DISP->present_ext(s, pixels, 0); }
 int   papp_disp_present(papp_surface_t *s)                    { return DISP->present(s, 0); }
 int   papp_disp_touch(papp_surface_t *s, papp_touch_point_t *pts, int max)
 {
@@ -197,4 +198,9 @@ void papp_ui_message(const char *title, const char *text)
 int papp_ui_menu(const char *title, const char *const *items, int n, int initial)
 {
     return UI && UI->hdr.version >= 2 ? UI->menu(title, items, n, initial) : -1;
+}
+
+int papp_ui_volume(void)
+{
+    return UI && UI->hdr.version >= 3 ? UI->volume() : -1;
 }

@@ -134,6 +134,13 @@ typedef struct {
 } papp_manifest_t;
 
 #define PAPP_MF_STACK_PSRAM  (1u << 0)   /* allocate the main stack in PSRAM */
+#define PAPP_MF_HIDDEN       (1u << 1)   /* test / developer app: off the home screen unless
+                                           "Show developer apps" is on */
+
+/* Exit code (main's return value or papp_exit()) asking the App Manager to start
+ * the same app again, fresh and without arguments: an emulator's "Exit game"
+ * goes back to its ROM browser with clean core state. */
+#define PAPP_EXIT_RELAUNCH   0x52454C41   /* 'RELA' */
 
 /* ── SYS interface ──────────────────────────────────────────────────────── */
 
@@ -193,7 +200,7 @@ typedef struct {
 /* ── DISP interface ─────────────────────────────────────────────────────── */
 
 #define PAPP_IF_DISP      PAPP_FOURCC('D', 'I', 'S', 'P')
-#define PAPP_IF_DISP_VER  1
+#define PAPP_IF_DISP_VER  3      /* v2: touch_read(NULL) = display coordinates; v3: present_ext */
 
 enum { PAPP_PIXFMT_RGB565 = 1 };
 
@@ -235,7 +242,12 @@ typedef struct {
     void            (*surface_destroy)(papp_surface_t *s);
     void           *(*lock)(papp_surface_t *s, int *stride_px);         /* buffer to draw into */
     int             (*present)(papp_surface_t *s, uint32_t flags);      /* waits for vsync; 0 = ok */
+    /* Points in s's coordinates (outside it: dropped). v2: s == NULL gives
+     * landscape display coordinates, e.g. for touch zones beside the picture. */
     int             (*touch_read)(papp_surface_t *s, papp_touch_point_t *pts, int max);
+    /* v3: present the app's own buffer without copying it (width x height RGB565,
+     * stride = width); like present, returns once the frame is in the back buffer. */
+    int             (*present_ext)(papp_surface_t *s, const void *pixels, uint32_t flags);
 } papp_if_disp_t;
 
 /* ── AUDI interface ─────────────────────────────────────────────────────── */
@@ -430,7 +442,7 @@ typedef struct {
  * next present. They return early (CANCEL) when the app is asked to exit. */
 
 #define PAPP_IF_UI        PAPP_FOURCC('U', 'I', ' ', ' ')
-#define PAPP_IF_UI_VER    2      /* v2: menu */
+#define PAPP_IF_UI_VER    3      /* v2: menu, v3: volume */
 
 typedef struct {
     const char *title;           /* header, e.g. "NES"                               */
@@ -441,8 +453,13 @@ typedef struct {
      * With save_dir set, ROMs that have one offer Resume / Restart / Delete save. */
     const char *save_dir;
     const char *save_ext;        /* e.g. ".sav"                                       */
-    uint32_t    flags;           /* reserved, 0                                       */
+    uint32_t    flags;           /* PAPP_PICK_*_F                                     */
+    const char *exclude;         /* with PAPP_PICK_EXCLUDE_F: "neogeo.zip,bios.col"   */
 } papp_pick_cfg_t;
+
+#define PAPP_PICK_SAVE_NOEXT_F (1u << 0)  /* save is "<save_dir>/<file without ext><save_ext>" */
+#define PAPP_PICK_EXCLUDE_F    (1u << 1)  /* hide files named in cfg->exclude (case-insensitive) */
+#define PAPP_PICK_NO_DIRS_F    (1u << 2)  /* list files only (no sub-folders) */
 
 enum {
     PAPP_PICK_CANCEL = 0,        /* user backed out (or the app must exit)            */
@@ -468,6 +485,9 @@ typedef struct {
      * in-game menu. Returns the index picked, or -1 for back / exit request.
      * At most 7 items. */
     int  (*menu)(const char *title, const char *const *items, int n, int initial);
+    /* v3: the launcher's volume control over the app's picture (Y in the
+     * emulators): adjusts and saves the master volume. Returns 0..100. */
+    int  (*volume)(void);
 } papp_if_ui_t;
 
 /* ── Entry point ────────────────────────────────────────────────────────── */

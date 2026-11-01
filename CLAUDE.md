@@ -27,9 +27,19 @@ apps/                     Test/demo apps (hello, libc_test, gfx_demo: DISP test,
                           audio_test: AUDI test, args mix|cycles|block; input_test: INPT event log, arg secs;
                           thread_test: THRD test (--libc), args all|leave|exit|spin;
                           fast_bench: PSRAM vs FAST (internal SRAM) placement benchmark, arg rounds;
-                          browse_test: UI browser test, args root exts save_dir picks;
-                          nes/: NES emulator (nofrendo), build with `python apps/nes/build.py`,
-                          no args = ROM browser, or `-- <rom> [resume]`)
+                          browse_test: UI browser test, args root exts save_dir picks — all test apps are
+                          PAPP_MF_HIDDEN: shown on the home screen only with Settings → Show developer apps)
+apps/<emu>/               Emulators, cores copied from RetroESP32_P4, each with a build.py:
+                          nes (own glue), gb+gbc, sms+gg+col, pce, a78, spectrum, genesis, snes, lynx (C++),
+                          a26 (C++), a800 (C++), neogeo. No args = ROM browser, or `-- <rom> [resume]`.
+                          `python apps/build_all.py [name ...]` builds every app with a build.py
+apps/common/odroid/       RetroESP32 odroid_* / app_common / FreeRTOS / ESP-IDF shims on the SDK, so the cores
+                          and their *_run.c build unchanged; emu_main.c (browser → EMU_RUN; Exit game → PAPP_EXIT_RELAUNCH = back to the browser), emubuild.py;
+                          X = in-game menu, Y = volume, unless the core sets odroid_input_xy_menu_disable
+                          (SNES, Genesis, Neo Geo): then touch the left (menu) / right (volume) screen edge
+apps/common/icons/        88x88 icons of the emulator apps (emubuild copies <app>.png)
+apps/common/v1compat/     v1 `app_services_t` host on the SDK + v1build.py: the RetroESP32 v1 PSRAM games
+                          doom, opentyrian, quake, duke3d build with their own glue unchanged; frames go to the PPA without a copy (DISP v3 `present_ext`)
 tools/papp_dev.py         DevLink host tool
 tests/host/test_reloc.py  Host relocation equivalence test
 ```
@@ -51,7 +61,9 @@ python tools\papp_dev.py --port COM9 crash --elf build\apps\hello\hello.elf    #
 python tests\host\test_reloc.py                                               # packer/relocator check
 ```
 
-Apps in `/sd/apps/<dir>/<file>.papp` (+ optional `icon.png`) appear on the home screen. Every `papp_dev.py`
+Apps in `/sd/apps/<dir>/<file>.papp` appear on the home screen. Icon: an `icon.png` in the app's source
+folder (PNG, square, best 88x88, transparency OK; corners are rounded by the launcher) is copied by
+`papp_build.py` and uploaded by `deploy` to `/sd/apps/<dir>/icon.png`; without one the tile shows the initial. Every `papp_dev.py`
 command also sets the board clock from the PC.
 `deploy` = upload to `/sd/apps/<name>/<name>.papp` → run → stream logs → exit code of the app
 (124 timeout). `shot out.png` = screenshot of the visible framebuffer, in landscape (open it to see

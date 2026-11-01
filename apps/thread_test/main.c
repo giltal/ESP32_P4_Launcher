@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-PAPP_MANIFEST(.id = "test.thread", .name = "Thread test", .version = "0.1.0", .main_stack = 16384);
+PAPP_MANIFEST(.id = "test.thread", .name = "Thread test", .version = "0.1.0", .main_stack = 16384, .flags = PAPP_MF_HIDDEN);
 
 static int s_fail;
 

@@ -68,6 +68,7 @@ typedef struct {
     char icon[176];             /* "S:/sd/apps/x/icon.png" or "" */
     char name[32];
     char id[32];
+    bool hidden;                /* PAPP_MF_HIDDEN */
 } app_entry_t;
 
 static app_entry_t s_apps[MAX_APPS];
@@ -83,6 +84,8 @@ static lv_obj_t *s_vol_slider, *s_bri_slider, *s_vol_val, *s_bri_val, *s_info;
 static temperature_sensor_handle_t s_tsens;
 static char s_launch[160];      /* set by a click; launched by the task loop */
 static int s_volume = 60, s_brightness = 100;
+static bool s_show_dev;          /* show PAPP_MF_HIDDEN apps */
+static lv_obj_t *s_dev_switch;
 
 /* ── Focus (gamepad / keyboard): nearest item in the pressed direction ──── */
 
@@ -168,6 +171,7 @@ static void scan_apps(void)
             if (lx_app_read_manifest(e->path, &m) == ESP_OK) {
                 snprintf(e->name, sizeof(e->name), "%s", m.name);
                 snprintf(e->id, sizeof(e->id), "%s", m.id);
+                e->hidden = m.flags & PAPP_MF_HIDDEN;
             } else {
                 snprintf(e->name, sizeof(e->name), "%.*s", (int)(n - 5), fe->d_name);
             }
@@ -175,7 +179,7 @@ static void scan_apps(void)
             struct stat st;
             snprintf(icon, sizeof(icon), "%s/icon.png", dir);
             if (stat(icon, &st) == 0) snprintf(e->icon, sizeof(e->icon), "S:%s", icon);
-            s_napps++;
+            if (!e->hidden || s_show_dev) s_napps++;
             break;                                  /* one app per folder */
         }
         closedir(sd);
@@ -490,6 +494,29 @@ static lv_obj_t *settings_row(lv_obj_t *parent, int y, const char *title, const 
 }
 
 static lv_obj_t *s_back;
+static void refresh_info(void);
+static lv_obj_t *s_crash_box, *s_crash_ok;
+
+static void on_crash_ok(lv_event_t *ev)
+{
+    lv_msgbox_close(s_crash_box);
+    s_crash_box = s_crash_ok = NULL;
+    s_focused = NULL;
+    home_focus_list();
+}
+
+static void on_dev_switch(lv_event_t *ev)
+{
+    s_show_dev = lv_obj_has_state(s_dev_switch, LV_STATE_CHECKED);
+    nvs_handle_t h;
+    if (nvs_open("launcher", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "devapps", s_show_dev);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    scan_apps();                /* the grid is rebuilt when Settings closes */
+    refresh_info();
+}
 
 static void build_settings(void)
 {
@@ -516,10 +543,24 @@ static void build_settings(void)
     s_vol_slider = settings_row(s_settings, 90, "Volume", LV_SYMBOL_VOLUME_MAX, 0, 100, s_volume, &s_vol_val);
     s_bri_slider = settings_row(s_settings, 178, "Brightness", LV_SYMBOL_IMAGE, 10, 100, s_brightness, &s_bri_val);
 
-    lv_obj_t *info = panel(s_settings, 24, 268, 752, 196, 14);
-    s_info = label(info, &lv_font_montserrat_16, C_DIM, "");
-    lv_obj_set_pos(s_info, 18, 14);
-    lv_obj_set_style_text_line_space(s_info, 8, 0);
+    lv_obj_t *dev = panel(s_settings, 24, 266, 752, 60, 14);
+    lv_obj_t *di = label(dev, &lv_font_montserrat_24, C_ACCENT, LV_SYMBOL_LIST);
+    lv_obj_set_pos(di, 18, 16);
+    lv_obj_t *dt = label(dev, &lv_font_montserrat_20, C_TEXT, "Show developer apps");
+    lv_obj_set_pos(dt, 60, 16);
+    s_dev_switch = lv_switch_create(dev);
+    lv_obj_set_pos(s_dev_switch, 664, 14);
+    lv_obj_set_style_bg_color(s_dev_switch, C_BLUE, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_outline_width(s_dev_switch, 3, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_color(s_dev_switch, C_ACCENT, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_pad(s_dev_switch, 6, LV_STATE_FOCUSED);
+    if (s_show_dev) lv_obj_add_state(s_dev_switch, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(s_dev_switch, on_dev_switch, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *info = panel(s_settings, 24, 336, 752, 136, 14);
+    s_info = label(info, &lv_font_montserrat_14, C_DIM, "");
+    lv_obj_set_pos(s_info, 18, 10);
+    lv_obj_set_style_text_line_space(s_info, 6, 0);
     apply_settings();
 }
 
@@ -553,12 +594,14 @@ static void show_settings(void)
     focus_add(s_back);
     focus_add(s_vol_slider);
     focus_add(s_bri_slider);
+    focus_add(s_dev_switch);
     focus_set(s_vol_slider);
 }
 
 static void show_home(void)
 {
     lv_screen_load(s_home);
+    build_grid();
     s_focused = NULL;
     home_focus_list();
 }
@@ -590,7 +633,7 @@ static void update_status(lv_timer_t *t)
         } else {
             lv_label_set_text(s_sd_free, "not mounted");
         }
-        snprintf(buf, sizeof(buf), "%d apps installed", s_napps);
+        snprintf(buf, sizeof(buf), "%d app%s installed", s_napps, s_napps == 1 ? "" : "s");
         lv_label_set_text(s_sd_apps, buf);
     }
 
@@ -613,6 +656,27 @@ static void update_status(lv_timer_t *t)
     snprintf(buf, sizeof(buf), LV_SYMBOL_USB " %d pad%s", pads, pads == 1 ? "" : "s");
     lv_label_set_text(s_sys_pads, buf);
     if (lv_screen_active() == s_settings && tick % 2 == 0) refresh_info();
+}
+
+/* After a crash reboot: say which app crashed (details: papp_dev.py crash) */
+static void show_crash_notice(void)
+{
+    lx_app_crash_ctx_t c;
+    if (!lx_app_last_crash(&c)) return;
+    papp_manifest_t m;
+    const char *name = lx_app_read_manifest(c.path, &m) == ESP_OK ? m.name : c.path;
+    char text[256];
+    snprintf(text, sizeof(text), "%s stopped with an error and the board restarted.\n"
+             "Details for developers: papp_dev.py crash", name);
+    lv_obj_t *mb = lv_msgbox_create(NULL);
+    lv_msgbox_add_title(mb, LV_SYMBOL_WARNING "  App crashed");
+    lv_msgbox_add_text(mb, text);
+    lv_obj_t *ok = lv_msgbox_add_footer_button(mb, "OK");
+    lv_obj_add_event_cb(ok, on_crash_ok, LV_EVENT_CLICKED, mb);
+    lv_obj_set_width(mb, 520);
+    s_crash_box = mb;
+    s_crash_ok = ok;
+    focus_set(ok);
 }
 
 /* ── LVGL glue ─────────────────────────────────────────────────────────── */
@@ -671,6 +735,10 @@ static void poll_keys(void)
         } else {
             continue;
         }
+        if (s_crash_box) {
+            if (ok || back) lv_obj_send_event(s_crash_ok, LV_EVENT_CLICKED, NULL);
+            continue;
+        }
         if (dx && s_focused && lv_obj_check_type(s_focused, &lv_slider_class)) {
             lv_slider_set_value(s_focused, lv_slider_get_value(s_focused) + dx * 5, LV_ANIM_OFF);
             lv_obj_send_event(s_focused, LV_EVENT_VALUE_CHANGED, NULL);
@@ -715,6 +783,9 @@ static void home_task(void *arg)
         if (was_running) {                      /* back from an app: redraw everything */
             was_running = false;
             lx_input_flush();
+            s_volume = lx_audio_master_volume_get();
+            lv_slider_set_value(s_vol_slider, s_volume, LV_ANIM_OFF);
+            apply_settings();
             if (lv_screen_active() != s_home) lv_screen_load(s_home);
             s_focused = NULL;
             refresh_home();
@@ -740,6 +811,7 @@ esp_err_t home_start(void)
         uint8_t v;
         if (nvs_get_u8(h, "volume", &v) == ESP_OK) s_volume = v;
         if (nvs_get_u8(h, "bright", &v) == ESP_OK) s_brightness = v;
+        if (nvs_get_u8(h, "devapps", &v) == ESP_OK) s_show_dev = v;
         nvs_close(h);
     }
 
@@ -769,6 +841,7 @@ esp_err_t home_start(void)
     lv_screen_load(s_home);
     lv_timer_create(update_status, 1000, NULL);
     update_status(NULL);
+    show_crash_notice();
 
     xTaskCreatePinnedToCore(home_task, "home", 8192, NULL, 4, NULL, 0);
     ESP_LOGI(TAG, "home screen up, %d apps", s_napps);

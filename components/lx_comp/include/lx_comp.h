@@ -42,6 +42,7 @@ void          lx_comp_surface_destroy(lx_surface_t *s);
 void          lx_comp_destroy_all(void);          /* app teardown */
 uint16_t     *lx_comp_lock(lx_surface_t *s, int *stride_px);
 esp_err_t     lx_comp_present(lx_surface_t *s);
+esp_err_t     lx_comp_present_ext(lx_surface_t *s, const void *pixels);   /* surface-sized RGB565, no copy */
 lx_rect_t     lx_comp_surface_rect(const lx_surface_t *s);
 /* Touch points mapped into surface coordinates; points outside it are dropped. */
 int           lx_comp_touch_read(lx_surface_t *s, bsp_touch_point_t *pts, int max);

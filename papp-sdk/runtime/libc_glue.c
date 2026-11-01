@@ -14,6 +14,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <time.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -219,6 +220,9 @@ int _stat(const char *path, struct stat *st)
 int _isatty(int fd)                   { return fd >= 0 && fd < FD_BASE; }
 int _unlink(const char *path)         { return papp_fs() && papp_fs()->remove(path) == 0 ? 0 : (errno = ENOENT, -1); }
 int _link(const char *a, const char *b) { errno = ENOSYS; return -1; }
+int _rename(const char *a, const char *b) { errno = ENOSYS; return -1; }   /* FS has no rename yet */
+int _fcntl(int fd, int cmd, int arg)  { return 0; }
+int fsync(int fd)                     { return 0; }                         /* writes go straight to the FS */
 int _kill(int pid, int sig)           { errno = EINVAL; return -1; }
 int _getpid(void)                     { return 1; }
 int mkdir(const char *path, mode_t m) { return papp_fs() && papp_fs()->mkdir(path) == 0 ? 0 : -1; }
@@ -230,6 +234,16 @@ int _gettimeofday(struct timeval *tv, void *tz)
         tv->tv_sec = us / 1000000;
         tv->tv_usec = us % 1000000;
     }
+    return 0;
+}
+
+/* usleep() / sleep() in newlib end up here */
+int nanosleep(const struct timespec *req, struct timespec *rem)
+{
+    if (!req) { errno = EINVAL; return -1; }
+    uint64_t us = (uint64_t)req->tv_sec * 1000000u + req->tv_nsec / 1000;
+    papp_delay_ms((uint32_t)((us + 999) / 1000));
+    if (rem) rem->tv_sec = rem->tv_nsec = 0;
     return 0;
 }
 

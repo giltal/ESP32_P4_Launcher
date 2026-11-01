@@ -69,6 +69,8 @@ papp_surface_t *papp_disp_surface_create(const papp_surface_cfg_t *cfg);
 void            papp_disp_surface_destroy(papp_surface_t *s);
 void           *papp_disp_lock(papp_surface_t *s, int *stride_px);
 int             papp_disp_present(papp_surface_t *s);        /* waits for vsync */
+/* Zero copy: show the app's own width x height RGB565 buffer (stride = width), no lock needed. */
+int             papp_disp_present_ext(papp_surface_t *s, const void *pixels);
 int             papp_disp_touch(papp_surface_t *s, papp_touch_point_t *pts, int max);
 
 /* ── Audio ──────────────────────────────────────────────────────────────────
@@ -151,6 +153,9 @@ void papp_ui_message(const char *title, const char *text);
  *   static const char *const items[] = { "Resume", "Save", "Exit" };
  *   switch (papp_ui_menu("Game menu", items, 3, 0)) { ... } */
 int  papp_ui_menu(const char *title, const char *const *items, int n, int initial);
+/* The launcher's volume overlay (what Y does in the emulators). Returns the
+ * new level 0..100, or -1 on a launcher without it. */
+int  papp_ui_volume(void);
 
 /* ── Raw interfaces ─────────────────────────────────────────────────────── */
 extern const papp_if_sys_t *papp_if_sys(void);

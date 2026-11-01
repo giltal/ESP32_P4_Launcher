@@ -224,8 +224,10 @@ def build_image(elf_path):
                         abs_pcrel[off] = tgt
                     elif rtype in (RV["R_RISCV_PCREL_LO12_I"], RV["R_RISCV_PCREL_LO12_S"]):
                         lo12_sites.append((off, rtype, S))    # S = address of the paired auipc
-                    elif not absolute_target and region(off) != region(tgt):
-                        # Crossing SLOW <-> FAST: the distance changes at load time
+                    elif not absolute_target and region(off) != region(S):
+                        # Crossing SLOW <-> FAST: the distance changes at load time. The
+                        # region comes from the symbol, not S+A: `&array[i - big]` can
+                        # wrap S+A far outside the symbol's own region.
                         if rtype == RV["R_RISCV_PCREL_HI20"]:
                             cross[off] = tgt
                         elif rtype in (RV["R_RISCV_CALL"], RV["R_RISCV_CALL_PLT"]):

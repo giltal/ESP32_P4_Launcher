@@ -30,6 +30,9 @@ void lx_ui_message(const char *title, const char *text, volatile bool *abort);
  * (B / tap outside / abort). At most LX_UI_MENU_MAX items. */
 #define LX_UI_MENU_MAX 7
 int  lx_ui_menu(const char *title, const char *const *items, int n, int initial, volatile bool *abort);
+/* The launcher's volume over the current picture: left/right adjust, B/Y close,
+ * closes by itself after 3 s; saved for the next boot. Returns the level. */
+int  lx_ui_volume(volatile bool *abort);
 
 /* Frees what an interrupted call left behind (app killed while browsing). */
 void lx_ui_reset(void);

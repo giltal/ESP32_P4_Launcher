@@ -8,7 +8,7 @@
  */
 #include "papp/papp.h"
 
-PAPP_MANIFEST(.id = "demo.hello", .name = "Hello", .version = "0.1.0", .main_stack = 8192);
+PAPP_MANIFEST(.id = "demo.hello", .name = "Hello", .version = "0.1.0", .main_stack = 8192, .flags = PAPP_MF_HIDDEN);
 
 static const char *const s_words[] = { "relocated", "pointer", "table", "works" };
 static int (*const s_ops[])(int, int) = { 0 };

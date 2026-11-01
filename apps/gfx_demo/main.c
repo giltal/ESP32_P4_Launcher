@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-PAPP_MANIFEST(.id = "demo.gfx", .name = "Gfx demo", .version = "0.1.0", .main_stack = 16384);
+PAPP_MANIFEST(.id = "demo.gfx", .name = "Gfx demo", .version = "0.1.0", .main_stack = 16384, .flags = PAPP_MF_HIDDEN);
 
 #define TRAIL 64
 

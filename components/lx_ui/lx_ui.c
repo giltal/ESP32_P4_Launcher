@@ -9,6 +9,8 @@
 #include "lx_gfx.h"
 #include "lx_comp.h"
 #include "lx_input.h"
+#include "lx_audio.h"
+#include "nvs.h"
 #include "bsp.h"
 
 #include <ctype.h>
@@ -220,8 +222,26 @@ void lx_ui_reset(void)
     memset(&S, 0, sizeof(S));
 }
 
+/* name (a file name or a path) is in the comma-separated list */
+static bool in_list(const char *list, const char *name)
+{
+    const char *slash = strrchr(name, '/');
+    if (slash) name = slash + 1;
+    size_t n = strlen(name);
+    for (const char *p = list; *p;) {
+        const char *e = strchr(p, ',');
+        size_t k = e ? (size_t)(e - p) : strlen(p);
+        if (k == n && strncasecmp(p, name, n) == 0) return true;
+        if (!e) break;
+        p = e + 1;
+    }
+    return false;
+}
+
 static bool ext_ok(const char *name)
 {
+    if ((S.cfg->flags & PAPP_PICK_EXCLUDE_F) && S.cfg->exclude && in_list(S.cfg->exclude, name))
+        return false;
     const char *exts = S.cfg->extensions;
     if (!exts || !*exts) return true;
     const char *dot = strrchr(name, '.');
@@ -247,7 +267,13 @@ static void save_path(const char *rom, char *out, size_t len)
 {
     out[0] = 0;
     if (!S.cfg->save_dir || !*S.cfg->save_dir) return;
-    snprintf(out, len, "%s/%s%s", S.cfg->save_dir, base_name(rom), S.cfg->save_ext ? S.cfg->save_ext : ".sav");
+    char name[PATH_LEN];
+    snprintf(name, sizeof(name), "%s", base_name(rom));
+    if (S.cfg->flags & PAPP_PICK_SAVE_NOEXT_F) {
+        char *dot = strrchr(name, '.');
+        if (dot && dot != name) *dot = 0;
+    }
+    snprintf(out, len, "%s/%s%s", S.cfg->save_dir, name, S.cfg->save_ext ? S.cfg->save_ext : ".sav");
 }
 
 static bool has_save(ent_t *e)
@@ -346,6 +372,7 @@ static void load_tab(void)
             while ((de = readdir(d))) {
                 if (de->d_name[0] == '.') continue;
                 bool dir = de->d_type == DT_DIR;
+                if (dir && (S.cfg->flags & PAPP_PICK_NO_DIRS_F)) continue;
                 if (!dir && !ext_ok(de->d_name)) continue;
                 if (!add_ent(de->d_name, dir ? E_DIR : 0, true)) break;
             }
@@ -800,6 +827,109 @@ int lx_ui_menu(const char *title, const char *const *items, int n, int initial, 
     backdrop_release();
     lx_input_flush();
     return r;
+}
+
+/* ── Volume overlay (Y in emulators) ───────────────────────────────────── */
+
+#define VOL_W     560
+#define VOL_H     176
+#define VOL_STEP  10
+#define VOL_IDLE_US 3000000
+
+static void vol_geometry(int *bx, int *by, int *barx, int *bary, int *barw)
+{
+    *bx = (S.cv.w - VOL_W) / 2;
+    *by = (S.cv.h - VOL_H) / 2;
+    *barx = *bx + 40;
+    *bary = *by + 76;
+    *barw = VOL_W - 80;
+}
+
+static void draw_volume(int level)
+{
+    if (!frame_begin()) return;
+    paint_background();
+    int bx, by, barx, bary, barw;
+    vol_geometry(&bx, &by, &barx, &bary, &barw);
+    lx_fill(&S.cv, bx - 2, by - 2, VOL_W + 4, VOL_H + 4, C_DIM);
+    lx_fill(&S.cv, bx, by, VOL_W, VOL_H, C_BOX);
+    draw_box_title(bx, by, VOL_W, "Volume");
+    char pct[8];
+    snprintf(pct, sizeof(pct), "%d%%", level);
+    lx_text(&S.cv, bx + VOL_W - 16 - lx_text_width(pct, 2), by + 8, pct, C_TEXT, 2);
+    lx_fill(&S.cv, barx, bary, barw, 28, C_BTN);
+    lx_fill(&S.cv, barx, bary, barw * level / 100, 28, level ? C_SAVE : C_BTN);
+    for (int i = 1; i < 100 / VOL_STEP; i++)                /* step ticks */
+        lx_fill(&S.cv, barx + barw * i * VOL_STEP / 100, bary, 2, 28, C_BOX);
+    lx_text(&S.cv, bx + 40, by + VOL_H - 44, "< >  adjust      B / Y  close", C_DIM, 2);
+    frame_end();
+}
+
+static void save_volume_task(void *arg)
+{
+    nvs_handle_t h;
+    if (nvs_open("launcher", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "volume", (uint8_t)(intptr_t)arg);  /* same key as the home screen */
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    vTaskDelete(NULL);
+}
+
+/* NVS writes flash with the cache off, and the caller may be an app thread with
+ * its stack in PSRAM (Quake, Duke3D): that aborts. Write from an internal stack. */
+static void save_volume(int level)
+{
+    xTaskCreate(save_volume_task, "vol_save", 4096, (void *)(intptr_t)level, 5, NULL);
+}
+
+int lx_ui_volume(volatile bool *abort)
+{
+    int level = lx_audio_master_volume_get(), start = level;
+    input_reset();
+    backdrop_capture();
+    int64_t idle_since = esp_timer_get_time();
+    bool done = false;
+    while (!done) {
+        draw_volume(level);
+        act_t a;
+        for (;;) {
+            if ((abort && *abort) || esp_timer_get_time() - idle_since > VOL_IDLE_US) { done = true; break; }
+            if (poll_action(&a)) break;
+            vTaskDelay(pdMS_TO_TICKS(15));
+        }
+        if (done) break;
+        idle_since = esp_timer_get_time();
+        switch (a.act) {
+        case A_LEFT: case A_DOWN: case A_DEL: case A_PGDN:
+            level = level - VOL_STEP < 0 ? 0 : level - VOL_STEP;
+            break;
+        case A_RIGHT: case A_UP: case A_PGUP:
+            level = level + VOL_STEP > 100 ? 100 : level + VOL_STEP;
+            break;
+        case A_TAP: {
+            int bx, by, barx, bary, barw;
+            vol_geometry(&bx, &by, &barx, &bary, &barw);
+            if (a.x < bx || a.x >= bx + VOL_W || a.y < by || a.y >= by + VOL_H) { done = true; break; }
+            if (a.y >= bary - 20 && a.y < bary + 48) {
+                int v = (a.x - barx) * 100 / barw;
+                v = (v + VOL_STEP / 2) / VOL_STEP * VOL_STEP;
+                level = v < 0 ? 0 : v > 100 ? 100 : v;
+            }
+            break;
+        }
+        case A_NONE:
+            break;
+        default:                /* A, B, X, Y, Start: close */
+            done = true;
+            break;
+        }
+        lx_audio_master_volume(level);
+    }
+    if (level != start) save_volume(level);
+    backdrop_release();
+    lx_input_flush();
+    return level;
 }
 
 /* ── On-screen keyboard ────────────────────────────────────────────────── */

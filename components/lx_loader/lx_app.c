@@ -70,6 +70,7 @@ static app_t                    *s_app;
 static volatile lx_app_state_t   s_state;
 static QueueHandle_t             s_queue;
 static lx_app_exit_cb_t          s_exit_cb;
+static volatile bool              s_relaunching;  /* between teardown and the relaunch */
 static char                      s_cur_path[128];
 static volatile uint32_t         s_run;          /* tags MSG_EXITED so a late one can't end the next run */
 
@@ -479,6 +480,16 @@ static void teardown(int code, bool forced)
     if (s_exit_cb) s_exit_cb(path, code, forced, na, nf);
 }
 
+/* PAPP_EXIT_RELAUNCH: start the app again (no arguments). lx_app_state()
+ * keeps reporting RUNNING meanwhile, so the home screen doesn't take over. */
+static void relaunch(const char *path)
+{
+    char err[96];
+    ESP_LOGI(TAG, "relaunching %s", path);
+    if (lx_app_launch(path, 0, NULL, err, sizeof(err)) != ESP_OK)
+        ESP_LOGE(TAG, "relaunch failed: %s", err);
+}
+
 static void manager_task(void *arg)
 {
     msg_t m;
@@ -486,7 +497,16 @@ static void manager_task(void *arg)
         xQueueReceive(s_queue, &m, portMAX_DELAY);
         if (!s_app || (m.type == MSG_EXITED && m.run != s_run)) continue;
         if (m.type == MSG_EXITED) {
-            teardown(m.code, false);
+            if (m.code == PAPP_EXIT_RELAUNCH) {
+                char path[sizeof(s_app->path)];
+                strlcpy(path, s_app->path, sizeof(path));
+                s_relaunching = true;
+                teardown(m.code, false);
+                relaunch(path);
+                s_relaunching = false;
+            } else {
+                teardown(m.code, false);
+            }
         } else if (m.type == MSG_STOP) {
             s_state = LX_APP_STOPPING;
             lx_svc_request_exit();
@@ -535,6 +555,7 @@ esp_err_t lx_app_stop(uint32_t grace_ms)
 
 lx_app_state_t lx_app_state(void)
 {
+    if (s_relaunching) return LX_APP_RUNNING;
     return s_state;
 }
 
