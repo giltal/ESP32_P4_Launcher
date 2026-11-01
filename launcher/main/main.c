@@ -11,6 +11,7 @@
 #include "lx_comp.h"
 #include "lx_audio.h"
 #include "lx_input.h"
+#include "lx_net.h"
 #include "home.h"
 
 #include <math.h>
@@ -93,6 +94,7 @@ void app_main(void)
         play_chime();               /* straight to the BSP, before the mixer owns it */
         if (lx_audio_init() != ESP_OK) ESP_LOGE(TAG, "audio mixer init failed");
     }
+    if (lx_net_init() != ESP_OK) ESP_LOGE(TAG, "network init failed");
     if (home_start() != ESP_OK)
         ESP_LOGE(TAG, "home screen failed to start");
     ESP_LOGI(TAG, "ready");

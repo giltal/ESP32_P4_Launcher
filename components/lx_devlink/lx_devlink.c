@@ -498,10 +498,11 @@ static void dispatch(uint8_t type, uint16_t seq, uint8_t *p, uint32_t len)
     case DL_PING:   reply_str(type, seq, "pong"); break;
     case DL_TIME:
         if (len >= 8) {
-            /* Boards without RTC/network get the clock from the host; it sends
-             * its local wall-clock time, so the launcher treats it as UTC. */
+            /* Boards without RTC/network get the clock from the host: its local
+             * wall-clock time, shown as is, then real UTC for a board with a zone. */
             int64_t secs;
             memcpy(&secs, p, sizeof(secs));
+            if (len >= 16 && getenv("TZ")) memcpy(&secs, p + 8, sizeof(secs));
             struct timeval tv = { .tv_sec = (time_t)secs };
             settimeofday(&tv, NULL);
             reply_str(type, seq, "ok");

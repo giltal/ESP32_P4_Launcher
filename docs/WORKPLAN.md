@@ -7,7 +7,7 @@
 
 ---
 
-## Status (2026-11-01, launcher 0.12.0: DISP v3 `present_ext`, zero-copy frames, DMA-aligned file buffers)
+## Status (2026-11-01, launcher 0.18.0: self-update, any-HID pads + mapping, Wi-Fi + NTP, battery, Clock, Files, folders)
 
 | Item | State | Evidence |
 |---|---|---|
@@ -64,21 +64,21 @@ New services follow the existing rules: interfaces are appended and versioned, a
 
 | # | Item | Size | Notes |
 |---|---|---|---|
-| A1 | HID report descriptor parser | M | Reads each pad's real layout, so most HID pads work first time. Current detection stays as a fallback for known pads |
-| A2 | Button mapping screen + per-pad storage | M | Settings → Controllers: press each button, saved by VID:PID on SD. The final answer for odd pads. Includes a live test view |
-| A3 | XInput support | M | USB vendor-class driver for Xbox-style pads |
-| A4 | Pad hot-plug and player assignment | S | Reconnect keeps the player slot; Settings shows who is who |
-| A5 | Diagnose the USB HID task abort | S | Seen once, unexplained. Do this before A1 touches the same code |
-| A6 | Battery level | S–M | BSP `bsp_battery_read`, `BSP_CAP_BATTERY`, home screen icon, low-battery warning, SYS interface. Needs a measured voltage-to-percent curve |
+| A1 | HID report descriptor parser: **done, 0.14** | — | `lx_hid_parse.c`, tested by `apps/hid_test` (0 failures). Non-Sony pads with a usable descriptor use it; known pads keep their parsers. **No real non-Sony pad tested yet** |
+| A2 | Button mapping screen: **done, 0.14** | — | Settings → Map controller, saved per VID:PID in NVS. Tested end to end with injected presses, including an A/B swap reaching an app. Skipped buttons keep their default; touch Reset clears it |
+| A3 | XInput support | M | Not started: needs a USB vendor-class driver, and an Xbox-style pad to test against |
+| A4 | Pad hot-plug and player assignment: **code done, 0.14** | — | A pad returns to its own slot by VID:PID. Needs a physical replug test |
+| A5 | Diagnose the USB HID task abort | S | Not reproduced, no data yet. The next occurrence leaves a core dump for `papp_dev.py crash` |
+| A6 | Battery level: **done, 0.15** | — | `bsp_battery_mv` (GPIO 53, divider and curve from the reference), `BSP_CAP_BATTERY`, system bar. Pin reads 3.92 V. Hidden outside 2.8-4.5 V. Not yet exposed to apps. Calibration against a measured cell is open |
 
 ### Milestone B — Files and home screen (no radio needed)
 
 | # | Item | Size | Notes |
 |---|---|---|---|
-| B1 | Home screen folders | M | Group apps (Emulators, Games, Tools). Proposal: a `category` manifest field plus user folders |
-| B2 | File browser | M | Proposal: a PAPP. Browse, rename, delete, copy, view text and images, launch a ROM in its emulator. Needs an "open with" file association |
+| B1 | Home screen folders: **done, 0.18** | — | Directories in `/sd/apps` without a `.papp`, one level. New, rename, delete (apps return to the main page, other files are kept) and move, by X / Y or a long press. Replaces the All / Emulators / Games / Other filter. **Long press not tested by touch** |
+| B2 | File browser: **first cut, 0.17** | — | `apps/files` PAPP: browse all of SD, details, text preview, delete with confirm (default Cancel). Rename, copy and open-with are missing |
 | B3 | File associations | S | Manifest list (`.nes`, `.sfc`, …), which B2 and any future library use |
-| B4 | Clock | S–M | See "Clock" below |
+| B4 | Clock: **done, 0.17** | — | `apps/clock` PAPP: clock, stopwatch, timer. SYS v2 `papp_local_time`. Alarms are not done |
 | B5 | Sleep and power | M | Dim and sleep on idle, wake on button. Matters once A6 shows battery life |
 
 **Clock: both, split by job.** Time itself belongs to the launcher: the home screen needs it, and NTP, time zone
@@ -92,12 +92,12 @@ the clock is lost at power-off, so check whether the board has an RTC.
 | # | Item | Size | Notes |
 |---|---|---|---|
 | C0 | **Spike: radio bring-up: done 2026-11-01** | — | See results below |
-| C0b | Match host and C6 firmware | S | The C6 has 2.0.17, `esp_hosted` 3.0.10 warns of a major mismatch. Pin a 2.x host, or update the C6 from the P4 (which also needs testing). Check whether its firmware includes BLE |
-| C1 | Wi-Fi service + Settings | M | Scan, password entry on the on-screen keyboard, saved networks, status icon |
-| C2 | NTP + time zone | S | Set after connecting; Settings picks the zone |
+| C0b | Match host and C6 firmware: **done** | — | `esp_hosted` pinned to ~2.0 (2.0.17, same as the C6): mismatch gone. The C6 reports BLE, so C4 needs no C6 update |
+| C1 | Wi-Fi service + Settings: **code done, 0.16** | — | `components/lx_net`: scan, password (touch or USB keyboard), saved network, status. Radio stays off until used. Scan tested. **Connecting has never been tested** |
+| C2 | NTP + time zone: **code done, 0.16** | — | Zone picker in the Wi-Fi screen. NTP is **untested**, as it needs a connection |
 | C3 | NET interface for apps | M–L | Optional sockets for PAPPs, tracked for teardown. Only when an app needs it |
 | C4 | BLE HID controllers | L | NimBLE on the P4 through the C6, pairing screen, feeds `lx_input` as another pad source. Reuses A1 and A2, so it comes after them |
-| C5 | Radio during games | S–M | Measure the frame and audio cost. Likely default: radio off while an app runs, unless the app asks for it |
+| C5 | Radio during games: **interim, 0.16** | S | Stopped while an app runs and resumed after (tested with the radio up, not connected). Measure the real cost before changing this |
 
 **C0 results** (standalone test project, launcher unchanged):
 
@@ -113,8 +113,8 @@ the clock is lost at power-off, so check whether the board has an RTC.
 
 | # | Item | Size | Notes |
 |---|---|---|---|
-| D1 | Update from SD | S | Firmware file on the card → `ota_0/1`. Needs no radio, and is the recovery path for D2 |
-| D2 | App rollback safety | S | Boot-confirm and automatic rollback, with factory as the last resort |
+| D1 | Update from SD: **done, 0.13** | — | `/sd/update/launcher.bin` is offered at boot. Good image tested, survives a reboot. Must be built after this feature, as the version is in the image |
+| D2 | App rollback safety: **done, 0.13** | — | Confirmed after 10 s. A build crashing at boot returned to the previous version by itself and the failure was shown once |
 | D3 | OTA from GitHub Releases | M | Read `latest.json` over HTTPS, compare versions, download, check SHA-256, flash. Needs C1 |
 | D4 | CI release builds | M | GitHub Actions builds the launcher and apps, then publishes a release |
 | D5 | Signed updates | M | Verify a signature, not just a hash. Do it before promoting OTA widely |
@@ -138,10 +138,10 @@ the clock is lost at power-off, so check whether the board has an RTC.
 
 ### Suggested order
 
-1. **Now:** finish hands-on testing, then A5, D1, D2, C0b.
-2. **Input:** A1, A2, A4, A3.
-3. **Everyday features:** A6, B3, B1, B2, B4, overlay.
-4. **Radio:** C1, C2, C5, D3, Wi-Fi file manager, C4, D4, D5.
+1. **Now:** finish hands-on testing, then enter a Wi-Fi network to test C1, C2 and C5.
+2. **Input:** try real pads against A1 and A4, then A3.
+3. **Everyday features:** B3, finish B2, overlay.
+4. **Radio:** D3, Wi-Fi file manager, C4, D4, D5.
 
 ### Open decisions
 

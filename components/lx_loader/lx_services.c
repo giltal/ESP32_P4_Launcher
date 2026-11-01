@@ -10,6 +10,7 @@
 #include "lx_services.h"
 
 #include <stdio.h>
+#include <time.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -174,6 +175,19 @@ static const char *sys_board_id(void)
     return bsp_info()->id;
 }
 
+static bool sys_local_time(papp_datetime_t *out)
+{
+    time_t now = time(NULL);
+    if (now < 1700000000) return false;
+    struct tm t;
+    localtime_r(&now, &t);
+    *out = (papp_datetime_t){ .year = (int16_t)(t.tm_year + 1900), .month = (uint8_t)(t.tm_mon + 1),
+                              .day = (uint8_t)t.tm_mday, .hour = (uint8_t)t.tm_hour,
+                              .minute = (uint8_t)t.tm_min, .second = (uint8_t)t.tm_sec,
+                              .weekday = (uint8_t)t.tm_wday };
+    return true;
+}
+
 static const papp_if_sys_t s_if_sys = {
     .hdr = { PAPP_IF_SYS, PAPP_IF_SYS_VER, sizeof(papp_if_sys_t) },
     .abi_version    = LX_ABI_VERSION,
@@ -183,6 +197,7 @@ static const papp_if_sys_t s_if_sys = {
     .delay_ms       = sys_delay_ms,
     .exit_requested = sys_exit_requested,
     .board_id       = sys_board_id,
+    .local_time     = sys_local_time,
 };
 
 /* ── MEM ────────────────────────────────────────────────────────────────── */

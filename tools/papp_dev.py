@@ -397,9 +397,21 @@ def run_injections(dl, specs, done):
             print(f"[inject] {spec}: {e}", file=sys.stderr)
 
 
+def app_remote_path(dl, name):
+    """Where the app belongs: an app moved into a home screen folder stays there"""
+    def subdirs(path):
+        return [e["n"] for e in json.loads(dl.request(LS, path.encode()).decode().split("\n#")[0]) if e["d"]]
+    top = subdirs("/sd/apps")
+    if name not in top:
+        for folder in top:
+            if name in subdirs(f"/sd/apps/{folder}"):
+                return f"/sd/apps/{folder}/{name}/{name}.papp"
+    return f"/sd/apps/{name}/{name}.papp"
+
+
 def cmd_deploy(dl, args, exit_box):
     name = os.path.splitext(os.path.basename(args.file))[0]
-    remote = args.dest or f"/sd/apps/{name}/{name}.papp"
+    remote = args.dest or app_remote_path(dl, name)
     status = dl.json(STATUS)
     if status["state"] != "idle":
         print(f"stopping running app {status['app']}", file=sys.stderr)
@@ -490,7 +502,7 @@ def main():
     try:
         # The board may have no clock source: give it ours (local wall-clock time)
         now = time.time()
-        dl.request(TIME, struct.pack("<q", int(now + time.localtime(now).tm_gmtoff)), timeout=2.0)
+        dl.request(TIME, struct.pack("<qq", int(now + time.localtime(now).tm_gmtoff), int(now)), timeout=2.0)
     except DevLinkError:
         pass                    # older launcher
 

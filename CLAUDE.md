@@ -9,7 +9,7 @@ Design: `docs/ARCHITECTURE.md`. Plan + status: `docs/WORKPLAN.md`.
 ## Layout
 
 ```
-launcher/                 ESP-IDF project (factory app; main.c + home.c = LVGL home screen). Board: -DLX_BOARD=<id> (default guition_p4_43)
+launcher/                 ESP-IDF project (factory app; main.c + home.c = LVGL home screen + app folders). Board: -DLX_BOARD=<id> (default guition_p4_43)
 boards/<id>/board/        BSP implementation (component "board"); boards/<id>/sdkconfig.board
 components/bsp/           BSP contract (bsp.h) — the core only talks to hardware through it
 components/papp_abi/      papp_abi.h — .papp v2 format + interfaces (shared with apps; no IDF includes)
@@ -20,7 +20,10 @@ components/lx_gfx/        software drawing + 8x16 font for launcher screens (rot
 components/lx_comp/       compositor: app surfaces → PPA scale/rotate → panel; launcher screens draw via it
 components/lx_audio/      audio engine: per-stream rings → resample → mix → BSP codec (fixed rate)
 components/lx_ui/         launcher-drawn screens for apps: content browser (pick_file) + message box
-components/lx_input/      input manager: USB HID gamepads/keyboards + board buttons (merged into P1) → players + event queue; HOME chord
+components/lx_input/      input manager: USB HID gamepads/keyboards + board buttons (merged into P1) → players + event queue; HOME chord;
+                          lx_hid_parse = HID descriptor parser; per-pad button mapping in NVS ("padmap")
+components/lx_update/     self-update from /sd/update/launcher.bin + rollback confirm
+components/lx_net/        Wi-Fi station, NTP, time zone via the ESP32-C6 (esp_hosted ~2.0 to match the C6's 2.0.17)
 papp-sdk/                 App SDK: include/papp/papp.h, runtime/ (crt0, libc glue), ld/papp.ld,
                           tools/papp_build.py, tools/papp_pack.py
 apps/                     Test/demo apps (hello, libc_test, gfx_demo: DISP test, args w h mode secs bufs;
@@ -61,7 +64,8 @@ python tools\papp_dev.py --port COM9 crash --elf build\apps\hello\hello.elf    #
 python tests\host\test_reloc.py                                               # packer/relocator check
 ```
 
-Apps in `/sd/apps/<dir>/<file>.papp` appear on the home screen. Icon: an `icon.png` in the app's source
+Apps in `/sd/apps/<dir>/<file>.papp` appear on the home screen; a directory there with no `.papp` is a folder of apps
+(`/sd/apps/<folder>/<dir>/<file>.papp`, one level; `deploy` finds an app moved into one). Icon: an `icon.png` in the app's source
 folder (PNG, square, best 88x88, transparency OK; corners are rounded by the launcher) is copied by
 `papp_build.py` and uploaded by `deploy` to `/sd/apps/<dir>/icon.png`; without one the tile shows the initial. Every `papp_dev.py`
 command also sets the board clock from the PC.
@@ -80,6 +84,8 @@ Input without touching the board: `input state [--watch 10]`, `input pad A+START
 - SD transfers need 64-byte-aligned DMA buffers, or they run a sector at a time at 1.5 MB/s: launcher code that
   reads whole files uses `lx_file_fast_io` (free its buffer after `fclose`).
 - `CONFIG_LX_APP_TEST_BASE_SHIFT_PAGES` must be 0 in normal builds (relocation test aid).
+- Flash writes (NVS, OTA) must run on a task with an internal stack, never on an app thread: PSRAM stacks abort.
+- After temporarily editing and restoring a source file, touch it: an old timestamp keeps the stale object.
 - `ESP_SYSTEM_PMP_IDRAM_SPLIT` stays off (FAST region needs executable heap SRAM). After copying an
   sdkconfig file back, touch it: an old timestamp makes the build silently keep the previous config.
 - Commit/push only when asked.

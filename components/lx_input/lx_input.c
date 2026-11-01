@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
+#include "nvs.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -27,6 +28,9 @@ typedef struct {
     int64_t  chord_since;           /* Select+Start both down since (0 = no) */
     bool     chord_fired;
     esp_timer_handle_t release;
+    uint16_t last_vid, last_pid;    /* survive a disconnect: the pad gets its slot back */
+    bool     has_map;
+    uint8_t  map[LX_INPUT_MAP_BITS];    /* raw button bit -> PAPP_BTN_ bit, 0xFF = none */
 } pad_t;
 
 static SemaphoreHandle_t s_lock;
@@ -75,12 +79,21 @@ void lx_input_flush(void)
 
 /* ── Gamepads ───────────────────────────────────────────────────────────── */
 
+static uint32_t pad_mapped(const pad_t *p, uint32_t raw)
+{
+    if (!p->has_map) return raw;
+    uint32_t out = 0;
+    for (int i = 0; i < LX_INPUT_MAP_BITS; i++)
+        if ((raw & (1u << i)) && p->map[i] < 32) out |= 1u << p->map[i];
+    return out;
+}
+
 /* Emit button events for a change of a pad's effective state; detect chords.
  * Called with the lock held. Returns true if the system chord fired. */
 static bool pad_refresh(int player)
 {
     pad_t *p = &s_pads[player];
-    uint32_t now = p->st.buttons | p->injected | (player == 0 ? s_board_buttons : 0);
+    uint32_t now = pad_mapped(p, p->st.buttons | p->injected) | (player == 0 ? s_board_buttons : 0);
     uint32_t diff = now ^ p->effective;
     for (int b = 0; diff; b++, diff >>= 1) {
         if (diff & 1)
@@ -125,15 +138,42 @@ bool lx_input_gamepad(int player, papp_gamepad_t *out)
     return c;
 }
 
+static void map_key(char *key, uint16_t vid, uint16_t pid)
+{
+    snprintf(key, 16, "p%04x%04x", vid, pid);
+}
+
+static bool map_load(uint16_t vid, uint16_t pid, uint8_t *map)
+{
+    nvs_handle_t h;
+    if (nvs_open("padmap", NVS_READONLY, &h) != ESP_OK) return false;
+    char key[16];
+    map_key(key, vid, pid);
+    size_t len = LX_INPUT_MAP_BITS;
+    bool ok = nvs_get_blob(h, key, map, &len) == ESP_OK && len == LX_INPUT_MAP_BITS;
+    nvs_close(h);
+    return ok;
+}
+
 int lx_input_pad_attach(const char *name, uint16_t vid, uint16_t pid)
 {
+    uint8_t map[LX_INPUT_MAP_BITS];
+    bool has_map = map_load(vid, pid, map);
     LOCK();
     int player = -1;
-    for (int i = 0; i < PAPP_MAX_PLAYERS; i++)
-        if (!s_pads[i].attached) { player = i; break; }
+    for (int i = 0; i < PAPP_MAX_PLAYERS && player < 0; i++)    /* back to its own slot */
+        if (!s_pads[i].attached && s_pads[i].last_vid == vid && s_pads[i].last_pid == pid) player = i;
+    for (int i = 0; i < PAPP_MAX_PLAYERS && player < 0; i++)    /* else a slot nobody left */
+        if (!s_pads[i].attached && !s_pads[i].last_vid) player = i;
+    for (int i = 0; i < PAPP_MAX_PLAYERS && player < 0; i++)
+        if (!s_pads[i].attached) player = i;
     if (player >= 0) {
         pad_t *p = &s_pads[player];
         p->attached = true;
+        p->last_vid = vid;
+        p->last_pid = pid;
+        p->has_map = has_map;
+        if (has_map) memcpy(p->map, map, sizeof(map));
         p->st = (papp_gamepad_t){ .connected = 1, .vid = vid, .pid = pid };
         snprintf(p->st.name, sizeof(p->st.name), "%s", name);
         push_event(PAPP_EV_DEVICE_ADDED, player, 0, 0);
@@ -155,6 +195,47 @@ void lx_input_pad_update(int player, uint32_t buttons, int16_t lx, int16_t ly, i
     bool fire = pad_refresh(player);
     UNLOCK();
     fire_sys(fire);
+}
+
+uint32_t lx_input_pad_raw(int player)
+{
+    if (player < 0 || player >= PAPP_MAX_PLAYERS) return 0;
+    LOCK();
+    uint32_t raw = s_pads[player].st.buttons | s_pads[player].injected;
+    UNLOCK();
+    return raw;
+}
+
+int lx_input_pad_first(void)
+{
+    LOCK();
+    int player = -1;
+    for (int i = 0; i < PAPP_MAX_PLAYERS && player < 0; i++)
+        if (s_pads[i].attached) player = i;
+    UNLOCK();
+    return player;
+}
+
+esp_err_t lx_input_pad_set_map(int player, const uint8_t *map)
+{
+    if (player < 0 || player >= PAPP_MAX_PLAYERS || !s_pads[player].attached) return ESP_ERR_INVALID_ARG;
+    pad_t *p = &s_pads[player];
+    char key[16];
+    map_key(key, p->st.vid, p->st.pid);
+    nvs_handle_t h;
+    esp_err_t e = nvs_open("padmap", NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = map ? nvs_set_blob(h, key, map, LX_INPUT_MAP_BITS) : nvs_erase_key(h, key);
+    if (e == ESP_ERR_NVS_NOT_FOUND) e = ESP_OK;
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    LOCK();
+    p->has_map = map != NULL;
+    if (map) memcpy(p->map, map, LX_INPUT_MAP_BITS);
+    bool fire = pad_refresh(player);
+    UNLOCK();
+    fire_sys(fire);
+    return e;
 }
 
 void lx_input_pad_detach(int player)

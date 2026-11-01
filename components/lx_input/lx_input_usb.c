@@ -8,6 +8,7 @@
  */
 #include "lx_input.h"
 #include "lx_input_priv.h"
+#include "lx_hid_parse.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -25,7 +26,7 @@ static const char *TAG = "lx_hid";
 typedef enum { DEV_FREE = 0, DEV_PAD, DEV_KBD, DEV_IGNORED } dev_kind_t;
 
 typedef enum {
-    FMT_UNKNOWN = 0, FMT_PS3, FMT_PS4, FMT_PS5, FMT_GENERIC, FMT_PSX_ADAPTOR,
+    FMT_UNKNOWN = 0, FMT_PS3, FMT_PS4, FMT_PS5, FMT_GENERIC, FMT_PSX_ADAPTOR, FMT_HID,
 } pad_fmt_t;
 
 typedef struct {
@@ -36,6 +37,8 @@ typedef struct {
     int detect_count;
     uint16_t vid, pid;
     bool waking;                    /* DS3 asleep: its wake-up press isn't HOME */
+    bool has_layout;
+    hid_layout_t layout;            /* from the report descriptor */
 } dev_t;
 
 static dev_t s_devs[MAX_DEVS];
@@ -95,6 +98,7 @@ static pad_fmt_t detect_format(const dev_t *d, const uint8_t *p, int len)
 {
     if (len == 8 && d->vid == 0x0810 && d->pid == 0x0001) return FMT_PSX_ADAPTOR;
     if (d->vid == 0x054C && d->pid == 0x0268 && len >= 49) return FMT_PS3;
+    if (d->has_layout && d->vid != 0x054C) return FMT_HID;  /* the pad says what it sends */
     if (len < 10 || p[0] != 0x01) return FMT_GENERIC;
     if (len >= 49) {
         bool ps3_axes = centred(p[6], 0x60, 0xA0) && centred(p[7], 0x60, 0xA0) &&
@@ -116,13 +120,47 @@ static pad_fmt_t detect_format(const dev_t *d, const uint8_t *p, int len)
 #define AX(v)  ((int16_t)(((int)(v) - 128) * 256))
 #define TRIG(v) ((uint16_t)((v) * 257))
 
+/* Default button order of generic pads; a saved mapping can change any of it */
+static const uint32_t k_hid_buttons[] = {
+    PAPP_BTN_X, PAPP_BTN_A, PAPP_BTN_B, PAPP_BTN_Y, PAPP_BTN_L1, PAPP_BTN_R1, PAPP_BTN_L2,
+    PAPP_BTN_R2, PAPP_BTN_SELECT, PAPP_BTN_START, PAPP_BTN_L3, PAPP_BTN_R3, PAPP_BTN_HOME,
+    PAPP_BTN_MISC,
+};
+
+static void parse_hid(dev_t *d, const uint8_t *p, int len)
+{
+    hid_state_t s;
+    if (!hid_layout_decode(&d->layout, p, (size_t)len, &s)) return;
+    uint32_t b = s.hat >= 0 ? hat_to_dpad((uint8_t)s.hat) : 0;
+    for (size_t i = 0; i < sizeof(k_hid_buttons) / sizeof(k_hid_buttons[0]); i++)
+        if (s.buttons & (1u << i)) b |= k_hid_buttons[i];
+    if (!d->layout.hat.size) {
+        if (s.axis[HID_AX_Y] < -16000) b |= PAPP_BTN_UP;
+        else if (s.axis[HID_AX_Y] > 16000) b |= PAPP_BTN_DOWN;
+        if (s.axis[HID_AX_X] < -16000) b |= PAPP_BTN_LEFT;
+        else if (s.axis[HID_AX_X] > 16000) b |= PAPP_BTN_RIGHT;
+    }
+    /* Right stick is Z/Rz when present, then Rx/Ry are the triggers */
+    bool zrz = d->layout.axis[HID_AX_Z].size && d->layout.axis[HID_AX_RZ].size;
+    bool trig = zrz && d->layout.axis[HID_AX_RX].size && d->layout.axis[HID_AX_RY].size;
+    lx_input_pad_update(d->player, b, s.axis[HID_AX_X], s.axis[HID_AX_Y],
+                        zrz ? s.axis[HID_AX_Z] : s.axis[HID_AX_RX],
+                        zrz ? s.axis[HID_AX_RZ] : s.axis[HID_AX_RY],
+                        trig ? (uint16_t)(s.axis[HID_AX_RX] + 32768) : 0,
+                        trig ? (uint16_t)(s.axis[HID_AX_RY] + 32768) : 0);
+}
+
 static void parse_pad(dev_t *d, const uint8_t *p, int len)
 {
     if (d->fmt == FMT_UNKNOWN) {
         if (len < 4) return;
         d->fmt = detect_format(d, p, len);
-        static const char *const names[] = { "?", "PS3", "PS4", "PS5", "generic", "PSX adaptor" };
+        static const char *const names[] = { "?", "PS3", "PS4", "PS5", "generic", "PSX adaptor", "HID descriptor" };
         ESP_LOGI(TAG, "player %d report format: %s (%d bytes)", d->player + 1, names[d->fmt], len);
+    }
+    if (d->fmt == FMT_HID) {
+        parse_hid(d, p, len);
+        return;
     }
 
     uint32_t b = 0;
@@ -324,6 +362,12 @@ static void open_device(hid_host_device_handle_t h)
         const uint8_t *desc = hid_host_get_report_descriptor(h, &dlen);
         /* No descriptor: assume a gamepad, like the reference did */
         if (!desc || desc_is_gamepad(desc, dlen)) d->kind = DEV_PAD;
+        if (desc && d->kind == DEV_PAD) {
+            d->has_layout = hid_layout_parse(desc, dlen, &d->layout);
+            ESP_LOGI(TAG, "report descriptor %u bytes: %s, %d buttons, hat %d, id %d", (unsigned)dlen,
+                     d->has_layout ? "usable" : "not usable", d->layout.buttons,
+                     d->layout.hat.size != 0, d->layout.report_id);
+        }
     }
     ESP_LOGI(TAG, "%04X:%04X iface proto %d -> %s", d->vid, d->pid, params.proto,
              d->kind == DEV_PAD ? "gamepad" : d->kind == DEV_KBD ? "keyboard" : "ignored");

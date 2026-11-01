@@ -6,14 +6,14 @@ The launcher is a permanent firmware that stays in flash. Applications are `.pap
 Pick one and it is loaded into PSRAM, relocated, linked to the launcher's services and started.
 There's no reflashing, no reboot and no flash wear. When it exits, every resource it used is reclaimed.
 
-19 applications run this way today, including NES through Neo Geo emulators plus Doom, Quake,
-Duke Nukem 3D and OpenTyrian.
+21 applications run this way today, including NES through Neo Geo emulators, Doom, Quake,
+Duke Nukem 3D and OpenTyrian, plus Clock and Files.
 
 ![Home screen](docs/images/home.png)
 
 | Launcher version | App ABI | Toolchain | First board |
 |---|---|---|---|
-| 0.12.0 | 2.0-preview | ESP-IDF v5.5.2 | Guition ESP32-P4 4.3" (480×800) |
+| 0.18.0 | 2.0-preview | ESP-IDF v5.5.2 | Guition ESP32-P4 4.3" (480×800) |
 
 > **Status: active development.** The ABI is a preview and may still change. Everything below describes
 > what exists in the code today; the plan for what comes next is in [docs/WORKPLAN.md](docs/WORKPLAN.md).
@@ -45,13 +45,13 @@ All of these are real screenshots, taken from the running board with `papp_dev.p
 | | |
 |---|---|
 | ![Settings](docs/images/settings.png) | ![Content browser](docs/images/browser.png) |
-| **Settings:** volume, brightness, developer apps and system information | **Content browser:** All, Favorites and Recent tabs, with live search. Every emulator gets it from the launcher |
+| **Settings:** volume, brightness, controller mapping, Wi-Fi and system information | **Content browser:** All, Favorites and Recent tabs, with live search. Every emulator gets it from the launcher |
 | ![Game menu](docs/images/game_menu.png) | ![Volume overlay](docs/images/volume.png) |
 | **In-game menu** over the running game | **Volume overlay,** drawn by the launcher for any app |
 | ![Doom](docs/images/doom.png) | ![Quake](docs/images/quake.png) |
 | **Doom** | **Quake** |
-| ![Duke Nukem 3D](docs/images/duke3d.png) | |
-| **Duke Nukem 3D** | |
+| ![Duke Nukem 3D](docs/images/duke3d.png) | ![Wi-Fi](docs/images/wifi.png) |
+| **Duke Nukem 3D** | **Wi-Fi and time zone,** through the ESP32-C6 |
 
 ## The PAPP concept
 
@@ -109,6 +109,10 @@ Two rules keep this portable: apps only see the ABI, and the launcher core only 
 - Input manager: USB HID gamepads and keyboards for up to 4 players, board buttons and touch
 - Content browser with folders, Favorites, Recent, search, and per-ROM Run/Resume/Restart/Delete save
 - DevLink: a USB protocol to upload, run, log, screenshot, inject input and read crash reports
+- Self-update from the SD card, with automatic rollback if a new version doesn't start
+- Controllers: USB HID pads are read from their own report descriptor, and any pad can be remapped in Settings
+- Wi-Fi and network time through the on-board ESP32-C6 (connecting isn't tested yet, see Known limitations)
+- Battery level in the system bar
 
 **Applications** (all built from this repository)
 
@@ -122,6 +126,7 @@ Two rules keep this portable: apps only see the ABI, and the launcher core only 
 | Atari 800 / XL / 5200 | atari800 | ZX Spectrum | spectemu |
 | Doom | prboom | Quake | WinQuake |
 | Duke Nukem 3D | Chocolate Duke3D | OpenTyrian | OpenTyrian |
+| Clock (clock, stopwatch, timer) | This project | Files (browse, preview, delete) | This project |
 
 The test apps (`hello`, `gfx_demo`, `audio_test`, `input_test`, `thread_test`, `fast_bench`, `browse_test`,
 `libc_test`) are hidden unless you turn on **Settings → Show developer apps**.
@@ -136,6 +141,7 @@ Reference board: **Guition ESP32-P4 4.3"**
 | Memory | 32 MB hex PSRAM at 200 MHz, 16 MB flash |
 | Display | 480×800 ST7701 MIPI-DSI panel, used in landscape as 800×480 |
 | Touch | GT911 capacitive |
+| Radio | ESP32-C6 companion over SDIO: Wi-Fi, BLE firmware present |
 | Audio | ES8311 codec, played at a fixed 48 kHz |
 | Storage | microSD |
 | Input | USB host for gamepads and keyboards, optional GPIO button pad |
@@ -189,6 +195,21 @@ python tools/papp_dev.py --port COM9 deploy build/apps/doom/doom.papp --timeout 
 `deploy` uploads the app and its icon, runs it and streams its log. You can also copy files to the card
 directly: anything at `/sd/apps/<dir>/<file>.papp` appears on the home screen.
 
+### 5. Update the launcher later
+
+Copy a newly built `launcher/build/launcher.bin` to `/sd/update/launcher.bin` and restart. The home screen
+offers the update. A new version has to run for 10 seconds to be kept. If it crashes first, the board returns
+to the previous version and says so.
+
+> After flashing with `idf.py flash`, the board boots the factory slot again.
+
+## Folders
+
+A directory in `/sd/apps` with no `.papp` in it is a folder on the home screen, and each app inside it keeps its
+own directory: `/sd/apps/<folder>/<app>/<app>.papp`. There is one level of folders. Deleting a folder returns its
+apps to the main page. Other files in a folder aren't shown on the home screen and are never deleted, so the
+folder stays until they are removed. `papp_dev.py deploy` finds an app that was moved into a folder.
+
 ## Preparing the SD card
 
 ```
@@ -222,7 +243,9 @@ player 1.
 
 | Where | Action |
 |---|---|
-| Home screen | D-pad moves, A starts, or tap an icon |
+| Home screen | D-pad moves, A starts, or tap an icon. B leaves a folder. The SD card panel opens Files |
+| App or folder menu | X or Y (Tab on a keyboard), or hold the icon: move an app, rename or delete a folder |
+| New folder | **New folder** at the top right. Type the name by touch or USB keyboard. With only a pad, A accepts the suggested name |
 | Browser | A runs, Y searches, X toggles a favorite, B goes back |
 | Most emulators | X opens the game menu, Y opens volume |
 | SNES, Genesis, Neo Geo | X and Y are game buttons, so tap the **left** screen edge for the menu and the **right** edge for volume |
@@ -335,7 +358,7 @@ Include only `papp/papp.h`. The full API, with examples, is in
 
 | Interface | Version | What it gives you | Example calls |
 |---|---|---|---|
-| `SYS` | 1 | Logging, time, exit, board id | `papp_log`, `papp_time_us`, `papp_exit` |
+| `SYS` | 2 | Logging, time, local time, exit, board id | `papp_log`, `papp_time_us`, `papp_local_time`, `papp_exit` |
 | `MEM` | 1 | Tracked allocation from PSRAM, internal or DMA memory | `papp_alloc`, `papp_free` |
 | `FS` | 1 | Files, also reachable through stdio with `--libc` | `papp_fs()` |
 | `DISP` | 3 | Surfaces, scaling, tear-free present, zero-copy present, touch | `papp_disp_surface_create`, `papp_disp_present`, `papp_disp_present_ext` |
@@ -522,7 +545,10 @@ Further reading:
   FAST region needs it. Teardown protects against leaks, not against a malicious app.
 - **The ABI is a preview,** and may change before 1.0.
 - **PPA scaling steps are 1/16,** so stretched output can leave a few pixels unused.
-- **Not done yet:** gamepad mapping UI, mouse, keyboard layouts, rumble, battery level, and the pull audio model.
+- **Wi-Fi connecting and NTP are untested.** Scanning works, but no network has been joined yet.
+- **Xbox-style (XInput) pads aren't supported yet,** and non-Sony HID pads are only tested with sample descriptors.
+- **Battery percentage isn't calibrated** against a real discharge curve.
+- **Not done yet:** mouse, keyboard layouts, rumble, BLE controllers, online updates, and the pull audio model.
 - **SNES:** no SuperFX games.
 - **Emulator menus:** the 2600 and Lynx draw theirs on a black background.
 - **Under observation:** the USB HID task aborted once during testing and hasn't recurred. The cause isn't known yet.

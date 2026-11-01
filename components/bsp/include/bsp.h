@@ -24,6 +24,7 @@ extern "C" {
 #define BSP_CAP_GPIO_PAD  (1u << 4)
 #define BSP_CAP_PADDLE    (1u << 5)
 #define BSP_CAP_USB_HOST  (1u << 6)
+#define BSP_CAP_BATTERY   (1u << 7)
 
 typedef struct {
     const char *id;            /* "guition_p4_43"                       */
@@ -114,6 +115,10 @@ void      bsp_audio_volume(int percent);          /* 0 = mute                   
 esp_err_t bsp_buttons_init(void);
 uint32_t  bsp_buttons_read(void);                 /* BSP_BTN_* currently down     */
 int       bsp_analog_read(int ch);                /* 0..65535 (calibrated), -1 if absent */
+
+/* Battery voltage in mV at its divider, -1 if the board can't measure it. Without a
+ * cell fitted the value is meaningless: callers check it is in the range of a Li-ion. */
+int       bsp_battery_mv(void);
 
 #ifdef __cplusplus
 }

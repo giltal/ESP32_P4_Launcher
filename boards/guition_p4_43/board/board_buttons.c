@@ -40,8 +40,8 @@ static const struct { int gpio; uint32_t bit; } s_digital[] = {
 #define N_DIGITAL (sizeof(s_digital) / sizeof(s_digital[0]))
 
 static adc_oneshot_unit_handle_t s_adc;
-static adc_channel_t s_ch_lr, s_ch_ud, s_ch_ab, s_ch_paddle;
-static bool s_pad, s_paddle;
+static adc_channel_t s_ch_lr, s_ch_ud, s_ch_ab, s_ch_paddle, s_ch_battery;
+static bool s_pad, s_paddle, s_battery;
 static uint32_t s_stuck;                /* BSP_BTN_* bits whose pin reads high at rest */
 
 static bool adc_channel(int gpio, adc_channel_t *ch)
@@ -83,6 +83,8 @@ esp_err_t bsp_buttons_init(void)
     /* The paddle has no presence signal; it reads as a pot on GPIO 51 */
     s_paddle = adc_channel(BOARD_PADDLE_ADC, &s_ch_paddle);
     if (s_paddle) board_set_cap(BSP_CAP_PADDLE);
+    s_battery = adc_channel(BOARD_BATTERY_ADC, &s_ch_battery);
+    if (s_battery) board_set_cap(BSP_CAP_BATTERY);
 
     if (!pad_detect()) {
         ESP_LOGI(TAG, "GPIO gamepad not connected (GPIO %d high with pull-up)", BOARD_PAD_DETECT);
@@ -134,6 +136,15 @@ uint32_t bsp_buttons_read(void)
     for (size_t i = 0; i < N_DIGITAL; i++)
         if (gpio_get_level(s_digital[i].gpio)) b |= s_digital[i].bit;
     return b & ~s_stuck;
+}
+
+int bsp_battery_mv(void)
+{
+    if (!s_battery) return -1;
+    int sum = 0;
+    for (int i = 0; i < 4; i++) sum += adc_read(s_ch_battery);
+    /* Scale and divider (168 : 100) from the reference project */
+    return sum / 4 * 3861 / 4095 * 168 / 100;
 }
 
 int bsp_analog_read(int ch)

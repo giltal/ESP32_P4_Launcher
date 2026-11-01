@@ -19,6 +19,8 @@
 #define BOARD_I2S_DIN       48
 #define BOARD_AUDIO_PA      11
 
+#define BOARD_BATTERY_ADC   53
+
 #define BOARD_SD_CLK        43
 #define BOARD_SD_CMD        44
 #define BOARD_SD_D0         39

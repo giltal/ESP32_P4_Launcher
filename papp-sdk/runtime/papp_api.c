@@ -6,7 +6,7 @@
 
 __attribute__((section(".papp_imports"), used))
 papp_import_t __papp_imports[] = {
-    { PAPP_IF_SYS, PAPP_IF_SYS_VER, PAPP_IMPORT_REQUIRED, 0 },
+    { PAPP_IF_SYS, 1, PAPP_IMPORT_REQUIRED, 0 },     /* v2 only for papp_local_time */
     { PAPP_IF_MEM, PAPP_IF_MEM_VER, PAPP_IMPORT_REQUIRED, 0 },
     { PAPP_IF_FS,  PAPP_IF_FS_VER,  PAPP_IMPORT_OPTIONAL, 0 },
     { PAPP_IF_DISP, PAPP_IF_DISP_VER, PAPP_IMPORT_OPTIONAL, 0 },
@@ -42,6 +42,10 @@ void        papp_delay_ms(uint32_t ms) { SYS->delay_ms(ms); }
 bool        papp_exit_requested(void) { return SYS->exit_requested(); }
 const char *papp_board_id(void)       { return SYS->board_id(); }
 uint32_t    papp_launcher_abi(void)   { return SYS->abi_version; }
+bool        papp_local_time(papp_datetime_t *out)
+{
+    return SYS->hdr.version >= 2 && SYS->local_time(out);
+}
 
 void  *papp_alloc(size_t size, uint32_t caps, size_t align) { return MEM->alloc(size, caps, align); }
 void  *papp_realloc(void *ptr, size_t size)                 { return MEM->realloc(ptr, size); }

@@ -44,6 +44,13 @@ void lx_input_pad_update(int player, uint32_t buttons, int16_t lx, int16_t ly, i
                          uint16_t lt, uint16_t rt);
 void lx_input_pad_detach(int player);
 
+/* Button mapping, per pad model (VID:PID), kept in NVS. Bits are PAPP_BTN_ positions.
+ * Writes flash: call from a task with an internal stack, never from an app thread. */
+#define LX_INPUT_MAP_BITS 20
+int       lx_input_pad_first(void);                 /* first real pad, or -1 */
+uint32_t  lx_input_pad_raw(int player);             /* buttons before the mapping */
+esp_err_t lx_input_pad_set_map(int player, const uint8_t *map);   /* NULL: back to default */
+
 /* Sources: keyboards (boot report: modifiers + up to 6 usages) */
 void lx_input_kbd_attach(void);
 void lx_input_kbd_report(uint8_t mods, const uint8_t keys[6]);

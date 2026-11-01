@@ -5,6 +5,18 @@ HOME on the pad (or Select+Start held 1 s) force-stops any app; use it only if t
 Emulators: Exit game → the ROM browser again (on the same ROM); B in the browser → home screen.
 GB/GBC, PCE and Spectrum also save the state on Exit game (as in RetroESP32), overwriting that ROM's save.
 
+## New since 0.13: needs hands-on testing
+
+| Item | What to try |
+|---|---|
+| Wi-Fi | Settings → Wi-Fi: join your network, reboot and check it reconnects, then start and exit a game and check it reconnects |
+| NTP | Pick a time zone, then check the clock is right after a power cycle |
+| USB pads | Any non-Sony pad: buttons and sticks, then Settings → Map controller, then unplug and replug |
+| Battery | Is a cell fitted? Does the percentage track charge and discharge? |
+| Folders | Top right New folder, type a name. Hold an app to move it in, open the folder, start the app, press Back. Hold the folder to rename and delete it |
+| Clock | Clock, stopwatch, timer and its beep |
+| Files | Browse, details, preview. Delete only on a file you don't need |
+
 ## How each app is driven
 
 | App | ROM folder | Menu opens with | Volume with | In-game menu items | Exit game goes to |

@@ -45,6 +45,7 @@ bool        papp_exit_requested(void);          /* poll in your main loop */
 void        papp_exit(int code) __attribute__((noreturn));
 const char *papp_board_id(void);
 uint32_t    papp_launcher_abi(void);
+bool        papp_local_time(papp_datetime_t *out);  /* false: clock not set, or older launcher */
 
 /* ── Memory ─────────────────────────────────────────────────────────────── */
 void  *papp_alloc(size_t size, uint32_t caps, size_t align);   /* PAPP_MEM_* caps */

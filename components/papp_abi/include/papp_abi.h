@@ -145,7 +145,13 @@ typedef struct {
 /* ── SYS interface ──────────────────────────────────────────────────────── */
 
 #define PAPP_IF_SYS       PAPP_FOURCC('S', 'Y', 'S', ' ')
-#define PAPP_IF_SYS_VER   1
+#define PAPP_IF_SYS_VER   2      /* v2: local_time */
+
+typedef struct {
+    int16_t year;
+    uint8_t month, day, hour, minute, second;
+    uint8_t weekday;             /* 0 = Sunday */
+} papp_datetime_t;
 
 typedef struct {
     papp_iface_hdr_t hdr;
@@ -156,6 +162,7 @@ typedef struct {
     void     (*delay_ms)(uint32_t ms);
     bool     (*exit_requested)(void);             /* set by DevLink STOP / overlay quit */
     const char *(*board_id)(void);
+    bool     (*local_time)(papp_datetime_t *out);   /* v2: false if the clock isn't set */
 } papp_if_sys_t;
 
 /* ── MEM interface ──────────────────────────────────────────────────────── */
@@ -460,6 +467,7 @@ typedef struct {
 #define PAPP_PICK_SAVE_NOEXT_F (1u << 0)  /* save is "<save_dir>/<file without ext><save_ext>" */
 #define PAPP_PICK_EXCLUDE_F    (1u << 1)  /* hide files named in cfg->exclude (case-insensitive) */
 #define PAPP_PICK_NO_DIRS_F    (1u << 2)  /* list files only (no sub-folders) */
+#define PAPP_PICK_FILES_F      (1u << 3)  /* file manager: real names, start at root, no recents */
 
 enum {
     PAPP_PICK_CANCEL = 0,        /* user backed out (or the app must exit)            */

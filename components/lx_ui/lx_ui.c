@@ -97,9 +97,12 @@ static bool ci_contains(const char *hay, const char *needle)
 }
 
 /* "Super_Mario Bros (U).nes" -> "Super Mario Bros (U)" */
+static bool s_real_names;               /* file manager: show names as they are */
+
 static void pretty(const char *name, bool is_dir, char *out, size_t len)
 {
     snprintf(out, len, "%s", name);
+    if (s_real_names) return;
     if (!is_dir) {
         char *dot = strrchr(out, '.');
         if (dot && dot != out) *dot = 0;
@@ -1061,6 +1064,7 @@ static void toggle_fav(const char *rom)
 /* Per-ROM menu. Returns PAPP_PICK_* to finish, or 0 to stay in the list. */
 static int rom_menu(ent_t *e, volatile bool *abort)
 {
+    if (s_real_names) return PAPP_PICK_RUN;     /* the file manager has its own menu */
     char rom[PATH_LEN], disp[PATH_LEN];
     full_path(e, rom, sizeof(rom));
     pretty(base_name(rom), false, disp, sizeof(disp));
@@ -1168,6 +1172,8 @@ int lx_ui_pick_file(const papp_pick_cfg_t *cfg, papp_pick_result_t *out, volatil
             snprintf(last, sizeof(last), "%s", S.recents.line[i]);
             break;
         }
+    s_real_names = cfg->flags & PAPP_PICK_FILES_F;
+    if (s_real_names) last[0] = 0;
     if (last[0]) {
         snprintf(S.dir, sizeof(S.dir), "%s", last);
         *strrchr(S.dir, '/') = 0;
@@ -1274,7 +1280,7 @@ done:
         snprintf(out->path, sizeof(out->path), "%s", rom);
         save_path(rom, out->save_path, sizeof(out->save_path));
         guard_in();
-        lines_write(&S.recents, RECENT_FILE, rom, rom, MAX_RECENT);
+        if (!s_real_names) lines_write(&S.recents, RECENT_FILE, rom, rom, MAX_RECENT);
         guard_out();
         ESP_LOGI(TAG, "picked %s (%s)", rom, result == PAPP_PICK_RESUME ? "resume" :
                  result == PAPP_PICK_RESTART ? "restart" : "run");
