@@ -8,12 +8,12 @@
  * happen on the home task. While an app runs the task only waits: the app
  * owns the display and input, and the home screen is redrawn when it exits.
  *
- * Apps: /sd/apps/<dir>/<file>.papp, named by their manifest, with an optional
+ * Apps: /sd/apps/<dir>/<file>.papp or .pax, named by their manifest, with an optional
  * /sd/apps/<dir>/icon.png (any size; shown at 88x88). Gamepad / keyboard move
  * the focus to the nearest item in the direction pressed; A / Enter starts.
  *
- * Folders: a directory in /sd/apps with no .papp in it, holding app directories
- * (/sd/apps/<folder>/<dir>/<file>.papp), one level only. X / Y, or holding a tile,
+ * Folders: a directory in /sd/apps with no app container in it, holding app directories
+ * (/sd/apps/<folder>/<dir>/<file>.papp or .pax), one level only. X / Y, or holding a tile,
  * opens its menu: move an app, rename or delete a folder.
  *
  * Settings -> Apps lists the apps published online (lx_appstore) and installs or
@@ -58,8 +58,9 @@ static const char *TAG = "home";
 #pragma GCC diagnostic ignored "-Wformat-truncation"
 
 #define APPS_DIR      "/sd/apps"
+#define PAX_DIR       "/sd/roms/pax"
 #define LAST_APP_FILE "/sd/launcher/last_app.txt"
-#define MAX_APPS      64           /* apps + folders */
+#define MAX_APPS      256          /* apps + folders, including flat PAX installs */
 #define MAX_NAME      24           /* folder name */
 #define ICON          88
 
@@ -86,6 +87,7 @@ typedef struct {
     char parent[MAX_NAME + 8];  /* folder it is in, "" = main page */
     bool hidden;                /* PAPP_MF_HIDDEN */
     bool is_folder;
+    bool read_only;             /* imported from the legacy /sd/roms/pax layout */
 } app_entry_t;
 
 static app_entry_t *s_apps;     /* MAX_APPS, in PSRAM: internal RAM is short at boot (7" board) */
@@ -179,7 +181,17 @@ static int app_cmp(const void *a, const void *b)
     return strcasecmp(x->name, y->name);
 }
 
-/* Adds the app in dir; false if there is no .papp in it */
+/* Return the recognized executable container suffix length, or zero. .pax and
+ * .papp both carry the same PAPP2 container and go through the same loader. */
+static size_t app_file_suffix_len(const char *name)
+{
+    size_t n = strlen(name);
+    if (n > 5 && strcasecmp(name + n - 5, ".papp") == 0) return 5;
+    if (n > 4 && strcasecmp(name + n - 4, ".pax") == 0) return 4;
+    return 0;
+}
+
+/* Adds the app in dir; false if there is no .papp or .pax in it */
 static bool scan_app(const char *dir, const char *parent)
 {
     bool found = false;
@@ -188,7 +200,8 @@ static bool scan_app(const char *dir, const char *parent)
     struct dirent *fe;
     while (s_napps < MAX_APPS && (fe = readdir(sd))) {
         size_t n = strlen(fe->d_name);
-        if (n < 6 || strcasecmp(fe->d_name + n - 5, ".papp") != 0) continue;
+        size_t suffix_len = app_file_suffix_len(fe->d_name);
+        if (!suffix_len) continue;
         app_entry_t *e = &s_apps[s_napps];
         memset(e, 0, sizeof(*e));
         snprintf(e->parent, sizeof(e->parent), "%s", parent);
@@ -205,7 +218,7 @@ static bool scan_app(const char *dir, const char *parent)
                 break;
             }
         } else {
-            snprintf(e->name, sizeof(e->name), "%.*s", (int)(n - 5), fe->d_name);
+            snprintf(e->name, sizeof(e->name), "%.*s", (int)(n - suffix_len), fe->d_name);
         }
         char icon[160];
         struct stat st;
@@ -227,7 +240,7 @@ static void scan_dir(const char *base, const char *parent)
     DIR *d = opendir(base);
     if (!d) return;
     struct dirent *de;
-    while (s_napps < MAX_APPS && (de = readdir(d))) {
+    while (s_napps < MAX_APPS - 1 && (de = readdir(d))) {
         if (de->d_name[0] == '.' || de->d_type != DT_DIR) continue;
         char dir[128];
         snprintf(dir, sizeof(dir), "%s/%s", base, de->d_name);
@@ -246,6 +259,62 @@ static void scan_dir(const char *base, const char *parent)
     closedir(d);
 }
 
+/* Older PAX cards keep app containers flat in /sd/roms/pax next to their
+ * sidecar JSON and shared runtime data. Show them as a virtual PAX folder;
+ * don't move files out of this directory from the home-screen context menu. */
+static void scan_legacy_pax(void)
+{
+    DIR *d = opendir(PAX_DIR);
+    if (!d) return;
+    int first = s_napps;
+    struct dirent *de;
+    while (s_napps < MAX_APPS - 1 && (de = readdir(d))) {
+        if (!app_file_suffix_len(de->d_name)) continue;
+        char path[160];
+        snprintf(path, sizeof(path), PAX_DIR "/%s", de->d_name);
+        papp_manifest_t m;
+        bool valid = lx_app_read_manifest(path, &m) == ESP_OK;
+        if (valid && m.id[0]) {
+            bool duplicate = false;
+            for (int i = 0; i < s_napps; i++)
+                if (s_apps[i].id[0] && strcmp(s_apps[i].id, m.id) == 0) {
+                    duplicate = true;
+                    break;
+                }
+            if (duplicate) continue;          /* /sd/apps takes precedence */
+        }
+        app_entry_t *e = &s_apps[s_napps];
+        memset(e, 0, sizeof(*e));
+        e->read_only = true;
+        snprintf(e->parent, sizeof(e->parent), "PAX");
+        snprintf(e->path, sizeof(e->path), "%s", path);
+        if (valid) {
+            snprintf(e->name, sizeof(e->name), "%s", m.name);
+            snprintf(e->id, sizeof(e->id), "%s", m.id);
+            snprintf(e->version, sizeof(e->version), "%s", m.version);
+            e->hidden = m.flags & PAPP_MF_HIDDEN;
+            if (strcmp(m.id, "tool.files") == 0)
+                snprintf(s_files_app, sizeof(s_files_app), "%s", path);
+        } else {
+            size_t n = strlen(de->d_name), suffix = app_file_suffix_len(de->d_name);
+            snprintf(e->name, sizeof(e->name), "%.*s", (int)(n - suffix), de->d_name);
+        }
+        if (!e->hidden || s_show_dev) {
+            s_napps++;
+            s_ninstalled++;
+        }
+    }
+    closedir(d);
+    if (s_napps > first && s_napps < MAX_APPS) {
+        app_entry_t *folder = &s_apps[s_napps++];
+        memset(folder, 0, sizeof(*folder));
+        folder->is_folder = true;
+        folder->read_only = true;
+        snprintf(folder->name, sizeof(folder->name), "PAX");
+        snprintf(folder->path, sizeof(folder->path), "%s", PAX_DIR);
+    }
+}
+
 static void scan_apps(void)
 {
     s_napps = s_ninstalled = 0;
@@ -253,6 +322,7 @@ static void scan_apps(void)
     if (!s_apps) s_apps = heap_caps_calloc(MAX_APPS, sizeof(app_entry_t), MALLOC_CAP_SPIRAM);
     if (!s_apps) return;
     scan_dir(APPS_DIR, "");
+    scan_legacy_pax();
     bool here = false;
     for (int i = 0; i < s_napps; i++) here |= s_apps[i].is_folder && strcmp(s_apps[i].name, s_folder) == 0;
     if (!here) s_folder[0] = 0;
@@ -415,12 +485,13 @@ static void build_grid(void)
         lv_obj_align(l, LV_ALIGN_BOTTOM_MID, 0, -6);
         lv_obj_set_user_data(t, e);
         lv_obj_add_event_cb(t, on_tile_click, LV_EVENT_CLICKED, e);
-        lv_obj_add_event_cb(t, on_tile_long, LV_EVENT_LONG_PRESSED, e);
+        if (!e->read_only)
+            lv_obj_add_event_cb(t, on_tile_long, LV_EVENT_LONG_PRESSED, e);
     }
     if (!shown) {
         lv_obj_t *l = label(s_grid, &lv_font_montserrat_16, C_DIM, s_folder[0] ?
                             "This folder is empty. To add an app, hold it or press X on the main page." :
-                            "No apps on the SD card yet (put them in /sd/apps/<name>/<name>.papp)");
+                            "No apps yet. Use /sd/apps/<name> or the existing /sd/roms/pax folder.");
         lv_obj_set_style_pad_top(l, 40, 0);
     }
     if (s_folder[0]) {
@@ -1247,15 +1318,14 @@ static lv_obj_t *s_menu;
 static void menu_open(const char *title, const char *text, int items);
 static void menu_add(const char *text, int act);
 
-/* Notes where catalogue apps are installed, from the .papp files in dir */
+/* Notes where catalogue apps are installed, from .papp or .pax files in dir */
 static void store_find_in(const char *dir)
 {
     DIR *d = opendir(dir);
     if (!d) return;
     struct dirent *fe;
     while ((fe = readdir(d))) {
-        size_t n = strlen(fe->d_name);
-        if (n < 6 || strcasecmp(fe->d_name + n - 5, ".papp") != 0) continue;
+        if (!app_file_suffix_len(fe->d_name)) continue;
         char path[160];
         snprintf(path, sizeof(path), "%s/%s", dir, fe->d_name);
         papp_manifest_t m;
@@ -1269,32 +1339,34 @@ static void store_find_in(const char *dir)
     closedir(d);
 }
 
-/* Apps are in /sd/apps/<dir> or /sd/apps/<folder>/<dir> */
+/* Apps may also be installed flat in the legacy /sd/roms/pax folder. */
 static void store_find_installed(void)
 {
     if (!s_store_inst) s_store_inst = heap_caps_malloc(LX_APPSTORE_MAX * sizeof(store_inst_t), MALLOC_CAP_SPIRAM);
     if (!s_store_inst) abort();
     memset(s_store_inst, 0, LX_APPSTORE_MAX * sizeof(store_inst_t));
     DIR *d = opendir(APPS_DIR);
-    if (!d) return;
-    struct dirent *de;
-    while ((de = readdir(d))) {
-        if (de->d_name[0] == '.' || de->d_type != DT_DIR) continue;
-        char dir[128];
-        snprintf(dir, sizeof(dir), APPS_DIR "/%s", de->d_name);
-        store_find_in(dir);
-        DIR *sub = opendir(dir);
-        if (!sub) continue;
-        struct dirent *se;
-        while ((se = readdir(sub))) {
-            if (se->d_name[0] == '.' || se->d_type != DT_DIR) continue;
-            char inner[160];
-            snprintf(inner, sizeof(inner), "%s/%s", dir, se->d_name);
-            store_find_in(inner);
+    if (d) {
+        struct dirent *de;
+        while ((de = readdir(d))) {
+            if (de->d_name[0] == '.' || de->d_type != DT_DIR) continue;
+            char dir[128];
+            snprintf(dir, sizeof(dir), APPS_DIR "/%s", de->d_name);
+            store_find_in(dir);
+            DIR *sub = opendir(dir);
+            if (!sub) continue;
+            struct dirent *se;
+            while ((se = readdir(sub))) {
+                if (se->d_name[0] == '.' || se->d_type != DT_DIR) continue;
+                char inner[160];
+                snprintf(inner, sizeof(inner), "%s/%s", dir, se->d_name);
+                store_find_in(inner);
+            }
+            closedir(sub);
         }
-        closedir(sub);
+        closedir(d);
     }
-    closedir(d);
+    store_find_in(PAX_DIR);     /* /sd/apps entries keep precedence */
 }
 
 static bool store_queued(int i)
@@ -1775,7 +1847,7 @@ static void name_open(const char *title, const char *text, int mode)
 static void on_sd_click(lv_event_t *ev)
 {
     if (s_files_app[0]) snprintf(s_launch, sizeof(s_launch), "%s", s_files_app);
-    else folder_message("Files is not installed", "Copy the Files app to /sd/apps/files/files.papp.");
+    else folder_message("Files is not installed", "Copy the Files app (.papp or .pax) to /sd/apps/files/.");
 }
 
 static void on_count_click(lv_event_t *ev)

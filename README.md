@@ -2,7 +2,7 @@
 
 **Run applications from an SD card on an ESP32-P4, the way a PC runs a program from a disk.**
 
-The launcher is a permanent firmware that stays in flash. Applications are `.papp` files on the SD card.
+The launcher is permanent firmware that stays in flash. Applications use the PAPP2 container on the SD card; both `.papp` and `.pax` filenames are accepted.
 Pick one and it is loaded into PSRAM, relocated, linked to the launcher's services and started.
 There's no reflashing, no reboot and no flash wear. When it exits, every resource it used is reclaimed.
 
@@ -153,6 +153,8 @@ The test apps (`hello`, `gfx_demo`, `audio_test`, `input_test`, `thread_test`, `
 
 ## Hardware
 
+Experimental Elecrow AIO and Waveshare Nano + 4.3-inch DSI BSPs are also available; see [board details and validation status](docs/PAX_BOARDS.md).
+
 Three boards are supported. All run the same apps from the same SD card. Adding a board:
 [docs/PORTING_GUIDE.md](docs/PORTING_GUIDE.md).
 
@@ -225,7 +227,7 @@ python tools/papp_dev.py --port COM9 deploy build/apps/doom/doom.papp --timeout 
 ```
 
 `deploy` uploads the app and its icon, runs it and streams its log. You can also copy files to the card
-directly: anything at `/sd/apps/<dir>/<file>.papp` appears on the home screen. Or, on Wi-Fi, take published
+directly: anything at `/sd/apps/<dir>/<file>.papp` or `.pax` appears on the home screen. Or, on Wi-Fi, take published
 apps from Settings → Apps (see [Versions and publishing](#versions-and-publishing)).
 
 ### 5. Update the launcher later
@@ -239,10 +241,15 @@ to the previous version and says so.
 
 ## Folders
 
-A directory in `/sd/apps` with no `.papp` in it is a folder on the home screen, and each app inside it keeps its
-own directory: `/sd/apps/<folder>/<app>/<app>.papp`. There is one level of folders. Deleting a folder returns its
+A directory in `/sd/apps` with no `.papp` or `.pax` in it is a folder on the home screen, and each app inside it keeps its
+own directory: `/sd/apps/<folder>/<app>/<app>.papp` (or `.pax`). There is one level of folders. Deleting a folder returns its
 apps to the main page. Other files in a folder aren't shown on the home screen and are never deleted, so the
 folder stays until they are removed. `papp_dev.py deploy` finds an app that was moved into a folder.
+
+Existing PAX cards are also supported: app containers stored flat in `/sd/roms/pax/` appear inside a read-only
+**PAX** folder on the home screen. Their neighboring JSON files and shared data folders stay in place. Store updates
+for those apps replace the existing container there; apps installed under `/sd/apps/` take precedence if the same
+manifest ID is present in both locations.
 
 A folder can have its own icon: put an `icon.png` (best 88x88) in its directory, `/sd/apps/<folder>/icon.png`.
 `apps/common/icons/make_folder_icons.py` draws the Games and Emulators icons, `folder_games.png` and `folder_emulators.png`.
@@ -253,6 +260,7 @@ A folder can have its own icon: put an `icon.png` (best 88x88) in its directory,
 /sd
 ├── apps/<name>/<name>.papp     applications
 ├── apps/<name>/icon.png        optional icon (square, best at 88×88, transparency OK)
+├── roms/pax/<app>.pax          existing PAX applications (also supported)
 ├── roms/<system>/              ROMs and game data (table below)
 ├── odroid/data/<system>/       emulator saves (created for you)
 └── saves/doom/                 Doom saves (create this folder)
