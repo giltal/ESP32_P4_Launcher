@@ -14,6 +14,7 @@ papp_import_t __papp_imports[] = {
     { PAPP_IF_INPT, 1, PAPP_IMPORT_OPTIONAL, 0 },          /* v2 functions checked at call */
     { PAPP_IF_THRD, PAPP_IF_THRD_VER, PAPP_IMPORT_OPTIONAL, 0 },
     { PAPP_IF_UI, 1, PAPP_IMPORT_OPTIONAL, 0 },              /* v2 functions checked at call */
+    { PAPP_IF_HTTP, PAPP_IF_HTTP_VER, PAPP_IMPORT_OPTIONAL, 0 },
 };
 
 #define SYS ((const papp_if_sys_t *)__papp_imports[0].iface)
@@ -24,6 +25,7 @@ papp_import_t __papp_imports[] = {
 #define INPT ((const papp_if_inpt_t *)__papp_imports[5].iface)
 #define THRD ((const papp_if_thrd_t *)__papp_imports[6].iface)
 #define UI   ((const papp_if_ui_t *)__papp_imports[7].iface)
+#define HTTP ((const papp_if_http_t *)__papp_imports[8].iface)
 
 const papp_if_sys_t *papp_if_sys(void) { return SYS; }
 const papp_if_mem_t *papp_if_mem(void) { return MEM; }
@@ -212,4 +214,29 @@ int papp_ui_menu(const char *title, const char *const *items, int n, int initial
 int papp_ui_volume(void)
 {
     return UI && UI->hdr.version >= 3 ? UI->volume() : -1;
+}
+
+/* ── HTTP ───────────────────────────────────────────────────────────────── */
+
+const papp_if_http_t *papp_if_http(void) { return HTTP; }
+
+int papp_http_state(void)
+{
+    return HTTP ? HTTP->state() : PAPP_HTTP_OFF;
+}
+
+int papp_http_request(const papp_http_req_t *req, char *buf, size_t max, size_t *len)
+{
+    if (!HTTP) {
+        if (len) *len = 0;
+        if (buf && max) buf[0] = 0;
+        return PAPP_HTTP_ERR_OFFLINE;
+    }
+    return HTTP->request(req, buf, max, len);
+}
+
+int papp_http_get(const char *url, char *buf, size_t max, size_t *len, uint32_t timeout_ms)
+{
+    papp_http_req_t req = { .size = sizeof(req), .url = url, .timeout_ms = timeout_ms };
+    return papp_http_request(&req, buf, max, len);
 }

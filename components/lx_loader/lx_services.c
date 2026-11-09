@@ -390,12 +390,14 @@ static const papp_iface_hdr_t *const s_registry[] = {
     &lx_if_inpt.hdr,
     &lx_if_thrd.hdr,
     &lx_if_ui.hdr,
+    &lx_if_http.hdr,
 };
 
 void lx_svc_init(lx_app_log_sink_t log_sink)
 {
     s_log_sink = log_sink;
     s_track_lock = xSemaphoreCreateMutex();
+    lx_svc_http_init();
 }
 
 const papp_iface_hdr_t *lx_svc_find(uint32_t id, uint16_t min_version)

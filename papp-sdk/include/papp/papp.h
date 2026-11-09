@@ -164,6 +164,25 @@ int  papp_ui_menu(const char *title, const char *const *items, int n, int initia
  * new level 0..100, or -1 on a launcher without it. */
 int  papp_ui_volume(void);
 
+/* ── HTTP ───────────────────────────────────────────────────────────────────
+ * Needs PAPP_MF_WIFI in the manifest (Wi-Fi is off for other apps) and a launcher
+ * with the HTTP interface; on an older one state is OFF and requests return
+ * PAPP_HTTP_ERR_OFFLINE (papp_if_http() == NULL tells the two apart).
+ *   PAPP_MANIFEST(.id = "you.weather", .name = "Weather", .flags = PAPP_MF_WIFI);
+ *   static char body[8192];
+ *   int status = papp_http_get("https://api.open-meteo.com/v1/forecast?...", body, sizeof(body), NULL, 15000);
+ *   if (status == 200) parse(body);      // NUL-terminated
+ * Other methods, headers and a request body:
+ *   papp_http_req_t req = { .size = sizeof(req), .method = "POST", .url = "https://...",
+ *                           .headers = "Content-Type: application/json\r\n",
+ *                           .body = json, .body_len = strlen(json), .timeout_ms = 15000 };
+ *   int status = papp_http_request(&req, body, sizeof(body), NULL);
+ * Both return the HTTP status or a PAPP_HTTP_ERR_*; they wait for the Wi-Fi
+ * connection within the timeout and return early when the app is asked to exit. */
+int  papp_http_state(void);                        /* PAPP_HTTP_OFF / CONNECTING / CONNECTED */
+int  papp_http_get(const char *url, char *buf, size_t max, size_t *len, uint32_t timeout_ms);
+int  papp_http_request(const papp_http_req_t *req, char *buf, size_t max, size_t *len);
+
 /* ── Raw interfaces ─────────────────────────────────────────────────────── */
 extern const papp_if_sys_t *papp_if_sys(void);
 extern const papp_if_mem_t *papp_if_mem(void);
@@ -172,6 +191,7 @@ extern const papp_if_audi_t *papp_if_audi(void);   /* NULL if absent */
 extern const papp_if_inpt_t *papp_if_inpt(void);   /* NULL if absent */
 extern const papp_if_thrd_t *papp_if_thrd(void);   /* NULL if absent */
 extern const papp_if_ui_t   *papp_if_ui(void);     /* NULL if absent */
+extern const papp_if_http_t *papp_if_http(void);   /* NULL if absent (older launcher) */
 
 #ifdef __cplusplus
 }

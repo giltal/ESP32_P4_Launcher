@@ -32,6 +32,8 @@ extern const papp_if_audi_t lx_if_audi;
 extern const papp_if_inpt_t lx_if_inpt;
 extern const papp_if_thrd_t lx_if_thrd;
 extern const papp_if_ui_t lx_if_ui;
+extern const papp_if_http_t lx_if_http;
+void lx_svc_http_init(void);
 
 /* THRD bookkeeping (lx_svc_thrd.c), driven by the App Manager */
 void lx_thrd_begin_run(void *main_task);

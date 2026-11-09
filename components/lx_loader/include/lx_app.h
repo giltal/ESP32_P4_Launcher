@@ -56,6 +56,7 @@ bool lx_app_overlay_request(void);
 
 lx_app_state_t lx_app_state(void);
 const char    *lx_app_path(void);          /* "" when idle */
+uint32_t       lx_app_flags(void);         /* manifest PAPP_MF_* of the running app, 0 when idle */
 uint32_t       lx_app_exec_base(void);     /* 0 when idle  */
 
 /* Reads an app's manifest (name, id, version) without loading the app. */

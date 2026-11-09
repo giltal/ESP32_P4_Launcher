@@ -72,6 +72,7 @@ static QueueHandle_t             s_queue;
 static lx_app_exit_cb_t          s_exit_cb;
 static volatile bool              s_relaunching;  /* between teardown and the relaunch */
 static char                      s_cur_path[128];
+static uint32_t                  s_cur_flags;      /* PAPP_MF_* of the running app */
 static volatile uint32_t         s_run;          /* tags MSG_EXITED so a late one can't end the next run */
 
 /* Survives a panic reboot so the next boot can say which app crashed and where. */
@@ -412,6 +413,7 @@ esp_err_t lx_app_launch(const char *path, int argc, const char *const *argv,
     lx_svc_begin_run();
     s_run++;
     snprintf(s_cur_path, sizeof(s_cur_path), "%s", a->path);
+    s_cur_flags = mf ? mf->flags : 0;
     s_app = a;
     s_state = LX_APP_RUNNING;
 
@@ -474,6 +476,7 @@ static void teardown(int code, bool forced)
     app_free(a);
     s_app = NULL;
     s_cur_path[0] = 0;
+    s_cur_flags = 0;
     s_crash_rec.magic = 0;
     s_state = LX_APP_IDLE;
 
@@ -566,6 +569,11 @@ lx_app_state_t lx_app_state(void)
 const char *lx_app_path(void)
 {
     return s_cur_path;          /* a copy: the app record is freed at exit, under readers' feet */
+}
+
+uint32_t lx_app_flags(void)
+{
+    return s_cur_flags;
 }
 
 uint32_t lx_app_exec_base(void)

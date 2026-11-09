@@ -136,6 +136,8 @@ typedef struct {
 #define PAPP_MF_STACK_PSRAM  (1u << 0)   /* allocate the main stack in PSRAM */
 #define PAPP_MF_HIDDEN       (1u << 1)   /* test / developer app: off the home screen unless
                                            "Show developer apps" is on */
+#define PAPP_MF_WIFI         (1u << 2)   /* keep Wi-Fi on while the app runs (HTTP interface);
+                                           for other apps the radio is off */
 
 /* Exit code (main's return value or papp_exit()) asking the App Manager to start
  * the same app again, fresh and without arguments: an emulator's "Exit game"
@@ -498,6 +500,49 @@ typedef struct {
      * emulators): adjusts and saves the master volume. Returns 0..100. */
     int  (*volume)(void);
 } papp_if_ui_t;
+
+/* ── HTTP interface ─────────────────────────────────────────────────────── */
+/* HTTP and HTTPS requests done by the launcher (TLS with its certificate bundle).
+ * Wi-Fi only runs for apps with PAPP_MF_WIFI in their manifest; for the others
+ * state() is OFF and requests fail at once. A request runs on a launcher task
+ * while the calling thread waits; it returns early (PAPP_HTTP_ERR_EXIT) when the
+ * app is asked to exit. One request at a time. Raw sockets would be NET. */
+
+#define PAPP_IF_HTTP      PAPP_FOURCC('H', 'T', 'T', 'P')
+#define PAPP_IF_HTTP_VER  1
+
+enum {
+    PAPP_HTTP_OFF = 0,           /* radio off, no saved network, or it can't join   */
+    PAPP_HTTP_CONNECTING,
+    PAPP_HTTP_CONNECTED,
+};
+
+/* request() results below 0 (otherwise the HTTP status) */
+#define PAPP_HTTP_ERR_OFFLINE  (-1)  /* not connected (in time)                      */
+#define PAPP_HTTP_ERR_FAILED   (-2)  /* no answer: DNS, TLS, connection              */
+#define PAPP_HTTP_ERR_TIMEOUT  (-3)
+#define PAPP_HTTP_ERR_TOO_BIG  (-4)  /* answer longer than max - 1: buf holds its start */
+#define PAPP_HTTP_ERR_ARG      (-5)
+#define PAPP_HTTP_ERR_EXIT     (-6)  /* the app is asked to exit                     */
+#define PAPP_HTTP_ERR_BUSY     (-7)  /* an abandoned request is still finishing      */
+
+typedef struct {
+    uint32_t    size;            /* sizeof(papp_http_req_t): fields may be appended   */
+    const char *method;          /* "GET" (also NULL), "POST", "PUT", "PATCH", "DELETE", "HEAD" */
+    const char *url;             /* http:// or https://; redirects are followed       */
+    const char *headers;         /* "Name: value\r\n" lines, or NULL                  */
+    const void *body;            /* request body, or NULL                             */
+    size_t      body_len;
+    uint32_t    timeout_ms;      /* the whole call, waiting for Wi-Fi included        */
+} papp_http_req_t;
+
+typedef struct {
+    papp_iface_hdr_t hdr;
+    int (*state)(void);          /* PAPP_HTTP_* */
+    /* The answer's body goes to buf, NUL-terminated; *len = its bytes (may be NULL).
+     * Returns the HTTP status or a PAPP_HTTP_ERR_*. */
+    int (*request)(const papp_http_req_t *req, char *buf, size_t max, size_t *len);
+} papp_if_http_t;
 
 /* ── Entry point ────────────────────────────────────────────────────────── */
 
