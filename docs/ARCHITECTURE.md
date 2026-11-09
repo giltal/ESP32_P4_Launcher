@@ -253,6 +253,7 @@ function-pointer-table speed and no symbol strings on the device.
 | `KV  ` | Settings | per-app key/value (int, string, blob); read-only global prefs (volume, brightness, language) | replaces NVS-path hacks |
 | `UI  ` | Launcher dialogs | **file picker** (extension filter, start dir), message box, on-screen keyboard, progress, toast | rendered by the launcher on the overlay layer |
 | `PWR ` | Power / board | battery %, charging, backlight, LED | optional |
+| `HTTP` | HTTP(S) requests | `state()`, `request(method, url, headers, body, timeout)`; SDK `papp_http_get` | the launcher does TLS (certificate bundle) on its own task; Wi-Fi stays on only for apps with `PAPP_MF_WIFI` |
 | `NET `, `BTHD`, `USBD`, `CAM ` | Reserved | Wi-Fi via esp_hosted, BLE HID, USB device/MSC, MIPI-CSI camera | later phases |
 
 ---

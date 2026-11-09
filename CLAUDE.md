@@ -17,7 +17,8 @@ boards/<id>/board/        BSP implementation (component "board", pins esp_hosted
                           power rails on two PI4IOE5V6408 I2C expanders, esp_hosted 1.4 for M5Stack's C6 firmware)
 components/bsp/           BSP contract (bsp.h) — the core only talks to hardware through it
 components/papp_abi/      papp_abi.h — .papp v2 format + interfaces (shared with apps; no IDF includes)
-components/lx_loader/     App Manager: loader, relocation, imports, services (SYS/MEM/FS/DISP/AUDI/INPT/THRD/UI), teardown
+components/lx_loader/     App Manager: loader, relocation, imports, services (SYS/MEM/FS/DISP/AUDI/INPT/THRD/UI/HTTP), teardown;
+                          lx_svc_http.c = HTTP(S) requests for apps with PAPP_MF_WIFI, on a launcher task
 components/lx_devlink/    DevLink: framed protocol over USB-Serial-JTAG (devlink_proto.h)
 components/lx_common/     crc32, launcher version
 components/lx_gfx/        software drawing + 8x16 font for launcher screens (rotation-aware)
@@ -30,7 +31,7 @@ components/lx_input/      input manager: USB HID gamepads/keyboards, XInput (Xbo
                           SDcard/config/gamepads.txt, downloaded by the Store); NVS "padmap" = pre-0.23, read-only fallback
 components/lx_update/     self-update from /sd/update/launcher.bin + rollback confirm; online update (latest.json);
                           lx_appstore = app catalogue for the Store (apps.json on the "apps" release; icons cached in /sd/launcher/store)
-components/lx_net/        Wi-Fi station, NTP, time zone via the ESP32-C6 (esp_hosted 2.12.13 on the Guition boards, 1.4 on Tab5/Waveshare);
+components/lx_net/        Wi-Fi station (paused while an app runs, unless its manifest has PAPP_MF_WIFI), NTP, time zone via the ESP32-C6 (esp_hosted 2.12.13 on the Guition boards, 1.4 on Tab5/Waveshare);
                           lx_c6 = the C6's firmware: version (DevLink info c6_fw) and update from /sd/update/c6.bin or the release;
                           saved network = /sd/config/wifi.txt (ssid=/password= lines; NVS "net" = pre-0.24, moved to the card at boot)
 components/lx_web/        Wi-Fi file manager: web page for the SD card, on request, with a PIN per start
@@ -41,7 +42,8 @@ apps/                     Test/demo apps (hello, libc_test, gfx_demo: DISP test,
                           audio_test: AUDI test, args mix|cycles|block; input_test: INPT event log, arg secs;
                           thread_test: THRD test (--libc), args all|leave|exit|spin;
                           fast_bench: PSRAM vs FAST (internal SRAM) placement benchmark, arg rounds;
-                          browse_test: UI browser test, args root exts save_dir picks — all test apps are
+                          browse_test: UI browser test, args root exts save_dir picks;
+                          http_test (+ http_test_noflag, apps/http_test/build.py): HTTP test, args url timeout_ms count method body — all test apps are
                           PAPP_MF_HIDDEN: shown on the home screen only with Settings → Show developer apps)
 apps/<emu>/               Emulators, cores copied from RetroESP32_P4, each with a build.py:
                           nes (own glue), gb+gbc, sms+gg+col, pce, a78, spectrum, genesis, snes, lynx (C++),

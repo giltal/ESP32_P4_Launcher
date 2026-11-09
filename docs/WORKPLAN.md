@@ -95,7 +95,7 @@ the clock is lost at power-off, so check whether the board has an RTC.
 | C0b | Match host and C6 firmware: **done** | — | `esp_hosted` pinned to ~2.0 (2.0.17, same as the C6): mismatch gone. The C6 reports BLE, so C4 needs no C6 update |
 | C1 | Wi-Fi service + Settings: **done, 0.16, fixed 0.19** | — | `components/lx_net`. Joining and rejoining a saved network work on the board. A saved network now keeps retrying, a scan works during a join, and DNS has 1.1.1.1 as backup. `NETGEAR98` is -81 dBm here, and joins took 9 to over 90 s |
 | C2 | NTP + time zone: **done, 0.16, confirmed 2026-11-02** | — | Zone picker in the Wi-Fi screen. NTP sets the clock once Wi-Fi connects (confirmed on the board by hand). DevLink also sets the clock from the PC |
-| C3 | NET interface for apps | M–L | Optional sockets for PAPPs, tracked for teardown. Only when an app needs it |
+| C3 | NET interface for apps | M–L | Optional sockets for PAPPs, tracked for teardown. Only when an app needs it. HTTP(S) requests have their own interface (`HTTP`, `PAPP_MF_WIFI`): `components/lx_loader/lx_svc_http.c`, test app `apps/http_test` |
 | C4 | BLE HID controllers | L | NimBLE on the P4 through the C6, pairing screen, feeds `lx_input` as another pad source. Reuses A1 and A2, so it comes after them |
 | C5 | Radio during games: **interim, 0.16** | S | Stopped while an app runs and resumed after (tested with the radio up, not connected). Measure the real cost before changing this |
 
