@@ -287,6 +287,19 @@ static void put_abort(void)
     }
 }
 
+/* Changes to /sd/apps made over DevLink: the home screen rescans when this moves */
+static volatile uint32_t s_app_changes;
+
+static void note_change(const char *path)
+{
+    if (path && strncmp(path, "/sd/apps", 8) == 0) s_app_changes++;
+}
+
+uint32_t lx_devlink_app_changes(void)
+{
+    return s_app_changes;
+}
+
 static void h_put_begin(uint16_t seq, const uint8_t *p, uint32_t len)
 {
     put_abort();
@@ -340,6 +353,7 @@ static void h_put_end(uint16_t seq)
         return;
     }
     ESP_LOGI(TAG, "received %s (%lu bytes)", s_put_path, (unsigned long)s_put_size);
+    note_change(s_put_path);
     reply_str(DL_PUT_END, seq, "ok");
 }
 
@@ -560,15 +574,20 @@ static void dispatch(uint8_t type, uint16_t seq, uint8_t *p, uint32_t len)
     case DL_STAT:   h_stat(seq, str); break;
     case DL_MKDIR:
         mkdirs(str, true);
+        note_change(str);
         reply_str(type, seq, "ok");
         break;
     case DL_RM:
-        if (remove(str) == 0 || rmdir(str) == 0) reply_str(type, seq, "ok");
+        if (remove(str) == 0 || rmdir(str) == 0) { note_change(str); reply_str(type, seq, "ok"); }
         else reply_err(type, seq, "cannot remove %s (errno %d)", str, errno);
         break;
     case DL_RENAME: {
         const char *to = str + strlen(str) + 1;
-        if ((const uint8_t *)to < p + len && rename(str, to) == 0) reply_str(type, seq, "ok");
+        if ((const uint8_t *)to < p + len && rename(str, to) == 0) {
+            note_change(str);
+            note_change(to);
+            reply_str(type, seq, "ok");
+        }
         else reply_err(type, seq, "rename failed (errno %d)", errno);
         break;
     }

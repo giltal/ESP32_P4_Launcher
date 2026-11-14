@@ -33,6 +33,7 @@
 #include "lx_net.h"
 #include "lx_c6.h"
 #include "lx_web.h"
+#include "lx_devlink.h"
 #include "esp_system.h"
 
 #include <ctype.h>
@@ -1425,14 +1426,20 @@ static void show_settings(void)
     focus_set(s_vol_slider);
 }
 
-static uint32_t s_web_seen;     /* file manager changes already on the grid */
+static uint32_t s_web_seen;     /* file manager + DevLink changes already on the grid */
+
+/* App files changed from outside: web file manager or DevLink (papp_dev put/rm/mv) */
+static uint32_t files_changed(void)
+{
+    return lx_web_changes() + lx_devlink_app_changes();
+}
 
 void show_home(void)
 {
     if (s_focused) lv_obj_remove_state(s_focused, LV_STATE_FOCUSED);    /* else it stays lit on Settings */
     lv_screen_load(s_home);
-    if (store_take_changed() | (lx_web_changes() != s_web_seen)) {
-        s_web_seen = lx_web_changes();
+    if (store_take_changed() | (files_changed() != s_web_seen)) {
+        s_web_seen = files_changed();
         scan_apps();
     }
     build_grid();
@@ -2304,9 +2311,9 @@ static void home_task(void *arg)
         wifi_tick();
         store_tick();
         if (store_updates() != s_badge_shown) badge_update();
-        if (lx_web_changes() != s_web_seen && lv_screen_active() == s_home &&
+        if (files_changed() != s_web_seen && lv_screen_active() == s_home &&
             lv_obj_get_child_count(lv_layer_top()) == 0) {            /* not under a menu or message */
-            s_web_seen = lx_web_changes();
+            s_web_seen = files_changed();
             const app_entry_t *e = s_focused ? lv_obj_get_user_data(s_focused) : NULL;
             char keep[160] = "";
             if (e) snprintf(keep, sizeof(keep), "%s", e->path);
