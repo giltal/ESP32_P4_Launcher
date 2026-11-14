@@ -17,7 +17,10 @@ boards/<id>/board/        BSP implementation (component "board", pins esp_hosted
                           power rails on two PI4IOE5V6408 I2C expanders, esp_hosted 1.4 for M5Stack's C6 firmware),
                           waveshare_p4_rpi_dsi (Waveshare dev kit + RPi Touch Display V1-style 800x480 panel: TC358762, ATTINY88
                           power/backlight at 0x45, FT5x06 touch; RGB565 shadow buffers converted to the RGB888 scan-out
-                          by the PPA, docs/PORT_WAVESHARE_P4.md)
+                          by the PPA, docs/PORT_WAVESHARE_P4.md), elecrow_p4_aio (Elecrow All-in-one Starter Kit SEE00804D:
+                          7" 1024x600 EK79007, scan direction on GPIO 32/33 = rotation 0, I2S amp without codec (software
+                          volume), 1-bit SD, ADC button ladder, C6 on SDIO slot 1 with the kit's pins; untested,
+                          docs/PORT_ELECROW_AIO.md)
 components/bsp/           BSP contract (bsp.h) — the core only talks to hardware through it
 components/papp_abi/      papp_abi.h — .papp v2 format + interfaces (shared with apps; no IDF includes)
 components/lx_loader/     App Manager: loader, relocation, imports, services (SYS/MEM/FS/DISP/AUDI/INPT/THRD/UI/NET/BLE), teardown;
