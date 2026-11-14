@@ -1,0 +1,16 @@
+# Pico Held 2 (ESP32-P4, 720x720 MIPI-DSI, no radio) - board-specific sdkconfig fragment
+# Revisions v1.3 and v1.4 share this file; the revision is chosen with PICOHELD2_REV (board/board_config.h).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+# Pre-v3 ESP32-P4 (chip revision v1.x). If your chips are v3.x, change these two lines.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_1=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
+# The speaker amp's current peaks can dip the 3.3 V rail on a weak battery or supply
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_5=y
+# The i2s audio chip sits on these lines
+CONFIG_USJ_ENABLE_USB_SERIAL_JTAG=n

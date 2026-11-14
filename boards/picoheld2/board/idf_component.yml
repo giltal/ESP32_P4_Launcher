@@ -1,0 +1,4 @@
+dependencies:
+  idf: ">=5.5"
+# No codec driver, panel driver, touch or Wi-Fi companion: the panel driver lives in board_display.c,
+# the DAC is plain I2S and there is no ESP32-C6.
