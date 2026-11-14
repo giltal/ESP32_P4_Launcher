@@ -36,7 +36,11 @@ components/lx_loader/     App Manager: loader, relocation, imports, services (SY
 components/fatfs/         copy of IDF 5.5.6's fatfs with exFAT on (FF_FS_EXFAT 1, + FF_USE_LABEL fix): overrides IDF's;
                           README_LAUNCHER.md = the changes, to redo when moving to another IDF version
 components/lx_devlink/    DevLink: framed protocol over USB-Serial-JTAG (devlink_proto.h)
-components/lx_common/     crc32, launcher version
+components/lx_common/     crc32, launcher version; lx_zip = zipped ROMs (central directory + the chip ROM's miniz tinfl):
+                          an app opening "dir/X.nes" that isn't there gets the .nes member of "dir/X.zip" (lx_services.c
+                          fs_open/fs_size): unpacked into PSRAM behind fopencookie, or for .gba/too big into
+                          /sd/launcher/zipcache (latest only, source.txt = what it holds); lx_ui's browser lists .zip for
+                          emulators whose extensions lack it and hands over the virtual name (saves follow it, recents keep the .zip)
 components/lx_gfx/        software drawing + 8x16 font for launcher screens (rotation-aware)
 components/lx_comp/       compositor: app surfaces → PPA scale/rotate → panel; launcher screens draw via it;
                           present is async with 2 buffers (task "lx_present" scales + flips while the app runs;

@@ -13,6 +13,7 @@
 #include "lx_net.h"
 #include "nvs.h"
 #include "bsp.h"
+#include "lx_zip.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -242,14 +243,8 @@ static bool in_list(const char *list, const char *name)
     return false;
 }
 
-static bool ext_ok(const char *name)
+static bool ext_listed(const char *exts, const char *dot)
 {
-    if ((S.cfg->flags & PAPP_PICK_EXCLUDE_F) && S.cfg->exclude && in_list(S.cfg->exclude, name))
-        return false;
-    const char *exts = S.cfg->extensions;
-    if (!exts || !*exts) return true;
-    const char *dot = strrchr(name, '.');
-    if (!dot) return false;
     size_t n = strlen(dot);
     for (const char *p = exts; *p;) {
         const char *e = strchr(p, ',');
@@ -259,6 +254,46 @@ static bool ext_ok(const char *name)
         p = e + 1;
     }
     return false;
+}
+
+/* Zipped ROMs: an emulator whose list has no .zip of its own also sees .zip files; the one picked
+ * is handed over under its virtual name (Zelda.zip with Zelda.nes inside -> Zelda.nes), which the
+ * launcher's file service unpacks on open (lx_zip.h). */
+static bool zip_mode(void)
+{
+    const char *exts = S.cfg->extensions;
+    return !s_real_names && exts && *exts && !ext_listed(exts, ".zip");
+}
+
+static bool is_zip(const char *name)
+{
+    const char *dot = strrchr(name, '.');
+    return dot && strcasecmp(dot, ".zip") == 0;
+}
+
+static bool ext_ok(const char *name)
+{
+    if ((S.cfg->flags & PAPP_PICK_EXCLUDE_F) && S.cfg->exclude && in_list(S.cfg->exclude, name))
+        return false;
+    const char *exts = S.cfg->extensions;
+    if (!exts || !*exts) return true;
+    const char *dot = strrchr(name, '.');
+    if (!dot) return false;
+    if (zip_mode() && is_zip(name)) return true;
+    return ext_listed(exts, dot);
+}
+
+/* The name the app opens: rom itself, or for a zip "dir/stem<ext of its ROM member>"; false if
+ * the zip holds no file the emulator takes */
+static bool rom_name(const char *rom, char *out, size_t len)
+{
+    snprintf(out, len, "%s", rom);
+    if (!zip_mode() || !is_zip(rom)) return true;
+    lx_zip_member_t m;
+    if (!lx_zip_find(rom, S.cfg->extensions, &m)) return false;
+    const char *dot = strrchr(m.name, '.');
+    snprintf(out + strlen(rom) - 4, len - (strlen(rom) - 4), "%s", dot);
+    return true;
 }
 
 static void full_path(const ent_t *e, char *out, size_t len)
@@ -286,7 +321,10 @@ static bool has_save(ent_t *e)
     if (!(e->flags & E_SAVE_KNOWN)) {
         char rom[PATH_LEN], sv[PATH_LEN];
         full_path(e, rom, sizeof(rom));
-        save_path(rom, sv, sizeof(sv));
+        char name[PATH_LEN];
+        if ((S.cfg->flags & PAPP_PICK_SAVE_NOEXT_F) || !rom_name(rom, name, sizeof(name)))
+            snprintf(name, sizeof(name), "%s", rom);
+        save_path(name, sv, sizeof(sv));
         struct stat st;
         if (sv[0] && stat(sv, &st) == 0 && st.st_size > 0) e->flags |= E_SAVE;
         e->flags |= E_SAVE_KNOWN;
@@ -1098,9 +1136,10 @@ static int rom_menu(ent_t *e, volatile bool *abort)
         case M_FAV:     toggle_fav(rom); break;
         case M_DELSAVE:
             if (confirm("Delete the save?", disp, abort)) {
-                char sv[PATH_LEN];
-                save_path(rom, sv, sizeof(sv));
+                char sv[PATH_LEN], name[PATH_LEN];
                 guard_in();
+                if (!rom_name(rom, name, sizeof(name))) snprintf(name, sizeof(name), "%s", rom);
+                save_path(name, sv, sizeof(sv));
                 remove(sv);
                 e->flags &= ~(E_SAVE | E_SAVE_KNOWN);
                 guard_out();
@@ -1192,7 +1231,7 @@ int lx_ui_pick_file(const papp_pick_cfg_t *cfg, papp_pick_result_t *out, volatil
     if (last[0]) select_name(base_name(last));
 
     int result = PAPP_PICK_CANCEL;
-    char rom[PATH_LEN] = "";
+    char rom[PATH_LEN] = "", name[PATH_LEN] = "";
     for (;;) {
         if (frame_begin()) {
             draw_list_body();
@@ -1273,7 +1312,12 @@ int lx_ui_pick_file(const papp_pick_cfg_t *cfg, papp_pick_result_t *out, volatil
             result = act == A_RUN ? (saved ? PAPP_PICK_RESUME : PAPP_PICK_RUN) : rom_menu(e, abort);
             if (result) {
                 full_path(e, rom, sizeof(rom));
-                goto done;
+                guard_in();
+                bool found = rom_name(rom, name, sizeof(name));
+                guard_out();
+                if (found) goto done;
+                lx_ui_message("No game inside", "This zip holds no file this emulator can run.", abort);
+                result = 0;
             }
             break;
         default:
@@ -1284,12 +1328,13 @@ int lx_ui_pick_file(const papp_pick_cfg_t *cfg, papp_pick_result_t *out, volatil
 done:
     if (result != PAPP_PICK_CANCEL && !(abort && *abort)) {
         out->action = result;
-        snprintf(out->path, sizeof(out->path), "%s", rom);
-        save_path(rom, out->save_path, sizeof(out->save_path));
+        if (!name[0]) snprintf(name, sizeof(name), "%s", rom);
+        snprintf(out->path, sizeof(out->path), "%s", name);
+        save_path(name, out->save_path, sizeof(out->save_path));
         guard_in();
         if (!s_real_names) lines_write(&S.recents, RECENT_FILE, rom, rom, MAX_RECENT);
         guard_out();
-        ESP_LOGI(TAG, "picked %s (%s)", rom, result == PAPP_PICK_RESUME ? "resume" :
+        ESP_LOGI(TAG, "picked %s (%s)", name, result == PAPP_PICK_RESUME ? "resume" :
                  result == PAPP_PICK_RESTART ? "restart" : "run");
     } else {
         result = PAPP_PICK_CANCEL;

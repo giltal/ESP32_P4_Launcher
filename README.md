@@ -341,6 +341,12 @@ an empty folder for each system's ROMs. Its [README](SDcard/README.md) explains 
 
 No ROMs, BIOS files or commercial game data are included. You need to supply your own legally obtained files.
 
+ROMs can stay zipped: `Zelda.zip` in `/sd/roms/nes/` shows up in the NES list, and the
+emulator gets the first file inside whose extension it takes. Its saves are named as if the ROM were `Zelda.nes`. A
+`.zip` is unpacked into memory when the game starts (stored or deflate, no passwords). Game Boy Advance ROMs are
+unpacked once into `/sd/launcher/zipcache/` instead, which keeps only the last one. Neo Geo games are zips of their
+own and are read as they are.
+
 | Game | Copy | In the `SDcard` folder |
 |---|---|---|
 | Doom | one IWAD to `/sd/roms/doom/`: `doom.wad`, `doom2.wad`, `plutonia.wad`, `tnt.wad`, `doom1.wad` or `freedoom.wad` (the first one found, in that order) | `doom1.wad`, the shareware episode. [Freedoom](https://freedoom.github.io/) also works (rename `freedoom1.wad` to `freedoom.wad`) |

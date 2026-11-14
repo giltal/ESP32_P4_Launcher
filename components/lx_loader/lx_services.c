@@ -13,6 +13,8 @@
 #include <time.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <strings.h>
 
 #include "esp_heap_caps.h"
 #include "esp_cache.h"
@@ -28,6 +30,7 @@
 #include "lx_audio.h"
 #include "lx_input.h"
 #include "lx_ui.h"
+#include "lx_zip.h"
 
 static const char *TAG = "lx_svc";
 
@@ -39,7 +42,7 @@ volatile bool lx_svc_exit_flag;
 static SemaphoreHandle_t s_track_lock;
 
 
-/* ── Allocation tracking: open-addressing hash set of live pointers ─────── */
+/* â”€â”€ Allocation tracking: open-addressing hash set of live pointers â”€â”€â”€â”€â”€â”€â”€ */
 
 static uintptr_t *s_ptrs;      /* 0 = empty, 1 = tombstone */
 static uint32_t   s_ptr_cap;   /* power of two             */
@@ -114,7 +117,7 @@ static bool track_remove(void *ptr)
     return found;
 }
 
-/* ── File tracking ──────────────────────────────────────────────────────── */
+/* â”€â”€ File tracking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 #define MAX_FILES 32
 static FILE *s_files[MAX_FILES];
@@ -133,14 +136,14 @@ void *lx_file_fast_io(FILE *f)
     return buf;
 }
 
-static bool file_track(FILE *f)
+static bool file_track(FILE *f, bool fast_io)
 {
     for (int i = 0; i < MAX_FILES; i++)
-        if (!s_files[i]) { s_files[i] = f; s_file_bufs[i] = lx_file_fast_io(f); return true; }
+        if (!s_files[i]) { s_files[i] = f; s_file_bufs[i] = fast_io ? lx_file_fast_io(f) : NULL; return true; }
     return false;
 }
 
-/* ── SYS ────────────────────────────────────────────────────────────────── */
+/* â”€â”€ SYS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 static void sys_log_write(const char *s, size_t len)
 {
@@ -212,14 +215,14 @@ static const papp_if_sys_t s_if_sys = {
     .utc_time       = sys_utc_time,
 };
 
-/* ── MEM ────────────────────────────────────────────────────────────────── */
+/* â”€â”€ MEM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 static uint32_t mem_idf_caps(uint32_t caps, size_t size)
 {
     uint32_t c = MALLOC_CAP_8BIT;
     if (caps & PAPP_MEM_FAST)       c |= MALLOC_CAP_INTERNAL;
     else if (caps & PAPP_MEM_LARGE) c |= MALLOC_CAP_SPIRAM;
-    else if (size >= 1024)          c |= MALLOC_CAP_SPIRAM;   /* default policy: big → PSRAM */
+    else if (size >= 1024)          c |= MALLOC_CAP_SPIRAM;   /* default policy: big â†’ PSRAM */
     else                            c |= MALLOC_CAP_INTERNAL;
     if (caps & PAPP_MEM_DMA)        c |= MALLOC_CAP_DMA;
     return c;
@@ -419,13 +422,138 @@ static const papp_if_mem_t s_if_mem = {
     .code_sync  = mem_code_sync,
 };
 
-/* ── FS ─────────────────────────────────────────────────────────────────── */
+/* â”€â”€ Zipped ROMs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* An app opening "dir/Zelda.nes" that isn't there, with "dir/Zelda.zip" holding a .nes member, gets
+ * the member: unpacked into PSRAM and served as an in-memory file, or, when it is too large to hold
+ * twice (GBA pages its ROM from the open file), unpacked once into ZIP_CACHE and opened from there.
+ * The cache keeps only the latest ROM. */
+
+#define ZIP_CACHE      "/sd/launcher/zipcache"
+#define ZIP_CACHE_SRC  ZIP_CACHE "/source.txt"
+
+typedef struct {
+    uint8_t *data;
+    size_t   size;
+    size_t   pos;
+} memfile_t;
+
+static ssize_t mf_read(void *c, char *buf, size_t n)
+{
+    memfile_t *m = c;
+    if (m->pos >= m->size) return 0;
+    if (n > m->size - m->pos) n = m->size - m->pos;
+    memcpy(buf, m->data + m->pos, n);
+    m->pos += n;
+    return (ssize_t)n;
+}
+
+static int mf_seek(void *c, off_t *off, int whence)
+{
+    memfile_t *m = c;
+    off_t base = whence == SEEK_SET ? 0 : whence == SEEK_CUR ? (off_t)m->pos : (off_t)m->size;
+    off_t to = base + *off;
+    if (to < 0) return -1;
+    m->pos = (size_t)to;
+    *off = to;
+    return 0;
+}
+
+static int mf_close(void *c)
+{
+    memfile_t *m = c;
+    heap_caps_free(m->data);
+    heap_caps_free(m);
+    return 0;
+}
+
+static bool zip_to_cache(const char *path, const char *zip, const lx_zip_member_t *m, char *out, size_t len)
+{
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    snprintf(out, len, ZIP_CACHE "/%s", base);
+    struct stat zs, cs;
+    if (stat(zip, &zs) != 0) return false;
+    char want[704], have[704] = "";
+    snprintf(want, sizeof(want), "%s|%s|%08lx|%lu|%ld\n", out, zip, (unsigned long)m->crc,
+             (unsigned long)m->usize, (long)zs.st_mtime);
+    FILE *s = fopen(ZIP_CACHE_SRC, "r");
+    if (s) { if (!fgets(have, sizeof(have), s)) have[0] = 0; fclose(s); }
+    if (strcmp(want, have) == 0 && stat(out, &cs) == 0 && cs.st_size == (off_t)m->usize) return true;
+
+    mkdir("/sd/launcher", 0775);
+    mkdir(ZIP_CACHE, 0775);
+    DIR *d = opendir(ZIP_CACHE);                /* only the latest ROM stays */
+    if (d) {
+        struct dirent *de;
+        char p[300];
+        while ((de = readdir(d))) {
+            if (de->d_name[0] == '.') continue;
+            snprintf(p, sizeof(p), ZIP_CACHE "/%s", de->d_name);
+            remove(p);
+        }
+        closedir(d);
+    }
+    int64_t t0 = esp_timer_get_time();
+    if (lx_zip_unpack_file(zip, m, out) != 0) return false;
+    ESP_LOGI(TAG, "%s: %lu bytes unpacked to the card in %lld ms", m->name, (unsigned long)m->usize,
+             (esp_timer_get_time() - t0) / 1000);
+    s = fopen(ZIP_CACHE_SRC, "w");
+    if (s) { fputs(want, s); fclose(s); }
+    return true;
+}
+
+static bool zip_in_ram(const char *path, const lx_zip_member_t *m)
+{
+    const char *dot = strrchr(path, '.');
+    if (dot && (strcasecmp(dot, ".gba") == 0 || strcasecmp(dot, ".agb") == 0)) return false;
+    size_t big = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    return m->usize <= 12u * 1024 * 1024 && (size_t)m->usize * 2 + 4u * 1024 * 1024 <= big;
+}
+
+/* NULL when path isn't a zipped ROM; sets *fast_io to whether the file wants a fast I/O buffer */
+static FILE *zip_open(const char *path, bool *fast_io)
+{
+    char zip[300];
+    lx_zip_member_t m;
+    if (!lx_zip_for(path, zip, sizeof(zip), &m)) return NULL;
+    if (zip_in_ram(path, &m)) {
+        int64_t t0 = esp_timer_get_time();
+        memfile_t *mf = heap_caps_calloc(1, sizeof(*mf), MALLOC_CAP_SPIRAM);
+        if (mf) mf->data = lx_zip_unpack_mem(zip, &m);
+        FILE *f = NULL;
+        if (mf && mf->data) {
+            mf->size = m.usize;
+            f = fopencookie(mf, "rb", (cookie_io_functions_t){ .read = mf_read, .seek = mf_seek, .close = mf_close });
+        }
+        if (!f && mf) { heap_caps_free(mf->data); heap_caps_free(mf); }
+        if (f) {
+            setvbuf(f, NULL, _IONBF, 0);        /* reads go straight to memcpy */
+            *fast_io = false;
+            ESP_LOGI(TAG, "%s: %s unpacked into memory (%lu bytes, %lld ms)", zip, m.name,
+                     (unsigned long)m.usize, (esp_timer_get_time() - t0) / 1000);
+        }
+        return f;
+    }
+    char cached[300];
+    if (!zip_to_cache(path, zip, &m, cached, sizeof(cached))) return NULL;
+    *fast_io = true;
+    return fopen(cached, "rb");
+}
+
+static bool read_only(const char *mode)
+{
+    return mode && mode[0] == 'r' && !strchr(mode, '+');
+}
+
+/* â”€â”€ FS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 static papp_file_t *fs_open(const char *path, const char *mode)
 {
     SVC_ENTER();
     FILE *f = fopen(path, mode);
-    if (f && !file_track(f)) {
+    bool fast_io = true;
+    if (!f && read_only(mode)) f = zip_open(path, &fast_io);
+    if (f && !file_track(f, fast_io)) {
         fclose(f);
         f = NULL;
         ESP_LOGE(TAG, "too many open files");
@@ -488,6 +616,11 @@ static long fs_size(const char *path)
     struct stat st;
     SVC_ENTER();
     long r = stat(path, &st) == 0 ? (long)st.st_size : -1;
+    if (r < 0) {                                /* a zipped ROM under its virtual name */
+        char zip[300];
+        lx_zip_member_t m;
+        if (lx_zip_for(path, zip, sizeof(zip), &m)) r = (long)m.usize;
+    }
     SVC_LEAVE();
     return r;
 }
@@ -521,7 +654,7 @@ static const papp_if_fs_t s_if_fs = {
     .mkdir  = fs_mkdir,
 };
 
-/* ── Registry & run bookkeeping ─────────────────────────────────────────── */
+/* â”€â”€ Registry & run bookkeeping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 static const papp_iface_hdr_t *const s_registry[] = {
     &s_if_sys.hdr,
