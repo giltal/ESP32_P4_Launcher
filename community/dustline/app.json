@@ -1,6 +1,6 @@
 {
   "author": "Gil Tal",
-  "description": "3D rally on the e3d engine: three stages (forest, snow, desert), pace notes, ghost car, evening look",
+  "description": "3D rally on the e3d engine: forest, snow and desert stages, pace notes, ghost car; touch, roller or twin-stick pads",
   "category": "games",
   "license": "MIT",
   "source": "https://github.com/giltal/ESP32_P4_3D_Engine/tree/main/game/dustline"
