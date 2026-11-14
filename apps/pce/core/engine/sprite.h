@@ -67,8 +67,10 @@ extern int frame;
 // number of frame displayed
 
 extern int sprite_usespbg;
-extern int pce_lines_cleared;
-extern void pce_clear_lines(int y1, int y2);
+extern uchar pce_row_clr[];
+extern void pce_rows_begin(int y1, int y2);
+extern void pce_clear_rows(int y1, int y2);
+extern void pce_fill_rows(int y1, int y2);
 
 //extern void (*PutSpriteMaskedFunction)(byte *P,byte *C,unsigned   long *C2,byte *R,int h,int inc,byte *M,byte pr);
 // the general function for *masked

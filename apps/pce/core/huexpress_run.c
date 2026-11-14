@@ -222,6 +222,25 @@ static int64_t pce_emu_acc  = 0;
 static int64_t pce_disp_acc = 0;
 static int64_t pce_wait_acc = 0;
 
+/* The frame to show: render buffer and visible area */
+static struct {
+    uint8_t *osd;
+    int x_off, y_off, dst_x, dst_y, copy_w, copy_h, border;
+} disp_job;
+
+/* Display task: copy the visible rows out of the render buffer (core 1, beside the emulator; the
+ * render buffers alternate, so the emulator draws the next frame into the other one meanwhile) */
+static void pce_disp_copy(uint8_t *centered_fb)
+{
+    if (disp_job.border)
+        memset(centered_fb, 0, PCE_FB_WIDTH * PCE_FB_HEIGHT);
+    for (int y = 0; y < disp_job.copy_h; y++) {
+        uint8_t *src = disp_job.osd + (y + disp_job.y_off) * XBUF_WIDTH + disp_job.x_off;
+        uint8_t *dst = centered_fb + (y + disp_job.dst_y) * PCE_FB_WIDTH + disp_job.dst_x;
+        memcpy(dst, src, disp_job.copy_w);
+    }
+}
+
 static void pce_display_task(void *arg)
 {
     (void)arg;
@@ -230,6 +249,7 @@ static void pce_display_task(void *arg)
         if (xSemaphoreTake(disp_go_sem, pdMS_TO_TICKS(100)) == pdTRUE) {
             if (!disp_task_running) break;
             int idx = disp_fb_idx ^ 1;   /* previous buffer */
+            pce_disp_copy(disp_fb[idx]);
             ili9341_write_frame_prosystem(disp_fb[idx], disp_pal_snap);
             xSemaphoreGive(disp_ready_sem);
         }
@@ -282,8 +302,6 @@ static void pce_gfx_draw(void)
     int64_t t_after_wait = esp_timer_get_time();
     pce_wait_acc += (t_after_wait - t_wait_start);
 
-    uint8_t *centered_fb = disp_fb[disp_fb_idx];
-
     /* Clamp / centre horizontally */
     int x_off = 0;
     int dst_x = 0;
@@ -306,17 +324,11 @@ static void pce_gfx_draw(void)
         dst_y = (PCE_FB_HEIGHT - src_h) / 2;
     }
 
-    /* Clear the border areas if not full-width/height */
-    if (dst_x > 0 || dst_y > 0 || copy_w < PCE_FB_WIDTH || copy_h < PCE_FB_HEIGHT) {
-        memset(centered_fb, 0, PCE_FB_WIDTH * PCE_FB_HEIGHT);
-    }
-
-    /* Copy visible scanlines */
-    for (int y = 0; y < copy_h; y++) {
-        uint8_t *src = osd_gfx_buffer + (y + y_off) * XBUF_WIDTH + x_off;
-        uint8_t *dst = centered_fb + (y + dst_y) * PCE_FB_WIDTH + dst_x;
-        memcpy(dst, src, copy_w);
-    }
+    disp_job.osd = osd_gfx_buffer;
+    disp_job.x_off = x_off; disp_job.y_off = y_off;
+    disp_job.dst_x = dst_x; disp_job.dst_y = dst_y;
+    disp_job.copy_w = copy_w; disp_job.copy_h = copy_h;
+    disp_job.border = (dst_x > 0 || dst_y > 0 || copy_w < PCE_FB_WIDTH || copy_h < PCE_FB_HEIGHT);
 
     /* Snapshot palette & signal display task */
     memcpy(disp_pal_snap, my_palette, 256 * sizeof(uint16_t));
@@ -341,10 +353,13 @@ static void pce_gfx_draw(void)
     if (fps_frame_count >= 60) {
         int64_t now = esp_timer_get_time();
         float elapsed_s = (now - fps_start_us) / 1000000.0f;
-        printf("PCE FPS: %.1f  EMU=%.1fms  WAIT=%.1fms\n",
+        extern long long pce_sleep_us_acc;   /* utils.c: the 60 Hz pace's sleep */
+        printf("PCE FPS: %.1f  EMU=%.1fms  WAIT=%.1fms  SPARE=%.1fms\n",
                fps_frame_count / elapsed_s,
                pce_emu_acc / (fps_frame_count * 1000.0f),
-               pce_wait_acc / (fps_frame_count * 1000.0f));
+               pce_wait_acc / (fps_frame_count * 1000.0f),
+               pce_sleep_us_acc / (fps_frame_count * 1000.0f));
+        pce_sleep_us_acc = 0;
         fps_start_us = now;
         fps_frame_count = 0;
         pce_emu_acc  = 0;
