@@ -1,0 +1,7 @@
+{
+  "author": "AboZaher",
+  "description": "An ON / OFF switch that lights an LED on the screen. Tap the switch or the LED, pad A toggles",
+  "category": "education",
+  "license": "MIT",
+  "source": "https://github.com/AboZaher/esp32-p4-launcher/tree/main/ledswitch_app"
+}
