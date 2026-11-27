@@ -175,6 +175,38 @@ int papp_input_analog(int ch)
     return INPT && INPT->hdr.version >= 2 ? INPT->analog(ch) : -1;
 }
 
+bool papp_input_joystick(int player, papp_joystick_t *out)
+{
+    if (INPT && INPT->hdr.version >= 4 && INPT->joystick) return INPT->joystick(player, out);
+    *out = (papp_joystick_t){ .hat = { -1, -1 } };
+    papp_gamepad_t g;
+    if (!papp_input_gamepad(player, &g)) return false;     /* an older launcher: the standard view */
+    static const uint8_t roles[6] = { PAPP_AXIS_X, PAPP_AXIS_Y, PAPP_AXIS_RX, PAPP_AXIS_RY, PAPP_AXIS_LT, PAPP_AXIS_RT };
+    const int16_t v[6] = { g.lx, g.ly, g.rx, g.ry, (int16_t)(g.lt - 32768), (int16_t)(g.rt - 32768) };
+    out->connected = 1;
+    out->naxes = 6;
+    for (int i = 0; i < 6; i++) { out->role[i] = roles[i]; out->axis[i] = v[i]; }
+    out->nbuttons = 20;
+    out->flags = PAPP_JOY_STD_BUTTONS;
+    out->buttons = g.buttons;
+    out->vid = g.vid;
+    out->pid = g.pid;
+    for (int i = 0; i < (int)sizeof(out->name) - 1 && g.name[i]; i++) out->name[i] = g.name[i];
+    return true;
+}
+
+bool papp_input_motion(int player, papp_motion_t *out)
+{
+    if (INPT && INPT->hdr.version >= 4 && INPT->motion) return INPT->motion(player, out);
+    *out = (papp_motion_t){ 0 };
+    return false;
+}
+
+bool papp_input_rumble(int player, uint16_t strong, uint16_t weak, uint32_t ms)
+{
+    return INPT && INPT->hdr.version >= 4 && INPT->rumble && INPT->rumble(player, strong, weak, ms);
+}
+
 /* ── Threads ────────────────────────────────────────────────────────────── */
 
 const papp_if_thrd_t *papp_if_thrd(void) { return THRD; }

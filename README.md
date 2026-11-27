@@ -339,7 +339,15 @@ Settings → Update downloads the newest GitHub release for this board, or copy 
 The home screen offers the update, and a board refuses another board's image. A new version has to run for 10 seconds to be kept. If it crashes first, the board returns
 to the previous version and says so.
 
-> After flashing with `idf.py flash`, the board boots the factory slot again.
+> After flashing with `idf.py flash`, the board boots the first launcher slot (ota_0) again.
+
+**Flash layout (0.38).** Launchers since 0.38 live in two 6.5 MB slots (`launcher/partitions.csv`) instead of a
+3 MB factory slot and two 3 MB update slots. A board updated from an older launcher moves itself once, about 10
+seconds after the new version starts: a box says *Moving the launcher to the bigger flash layout* (about 30 s,
+then a restart). Don't turn the board off while it is shown. The only step that can't be undone takes well under
+a second, but a power cut exactly then leaves a board that starts only after the full image
+(`launcher_<board id>_full.bin`) is flashed once over USB with the ESP Tool web page. Apps, saves, Wi-Fi and
+Bluetooth settings are not touched.
 
 The Wi-Fi chip (ESP32-C6) runs its own firmware, and it works best at the version of the launcher's
 Wi-Fi library (esp_hosted). The Wi-Fi screen shows both. When they differ, Settings → Update offers

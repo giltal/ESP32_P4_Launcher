@@ -1,0 +1,13 @@
+# snes: SNES-style pad: d-pad, four buttons, two shoulders (tools/make_pad_pictures.py; x,y,r or x,y,rx,ry in the 400x220 picture)
+L1=100,59,44,11
+R1=300,59,44,11
+UP=100,107,11
+DOWN=100,133,11
+LEFT=87,120,11
+RIGHT=113,120,11
+A=300,141,13
+B=321,120,13
+X=279,120,13
+Y=300,99,13
+SELECT=180,124,15,8
+START=220,124,15,8

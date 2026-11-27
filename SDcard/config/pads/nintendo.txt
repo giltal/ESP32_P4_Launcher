@@ -1,0 +1,18 @@
+# nintendo: Switch-style pad: A east, B south (functions by position) (tools/make_pad_pictures.py; x,y,r or x,y,rx,ry in the 400x220 picture)
+L2=100,25,26,13
+R2=300,25,26,13
+L1=102,47,36,11
+R1=298,47,36,11
+L3=110,100,21
+UP=150,139,10
+DOWN=150,161,10
+LEFT=139,150,10
+RIGHT=161,150,10
+R3=250,150,21
+A=296,119,13
+B=315,100,13
+X=277,100,13
+Y=296,81,13
+SELECT=176,82,10
+START=224,82,10
+HOME=214,112,11

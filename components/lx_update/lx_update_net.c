@@ -6,7 +6,11 @@
  * latest.json: {"version":"0.19.0","url":"https://...","size":1347392,"sha256":"<hex>",
  *               "boards":{"<board id>":{"url":...,"size":...,"sha256":...,
  *                                       "c6":{"version":"2.12.13","url":...,"size":...,"sha256":...}}, ...}}
- * "c6" is the Wi-Fi chip firmware that matches the board's launcher (optional).
+ * "c6" is the Wi-Fi chip firmware that matches the board's launcher (optional). An entry's own "version" wins
+ * over the top-level one.
+ * "boards_big" (0.38+, same shape) is read instead of "boards" once the board has the 6.5 MB slots
+ * (lx_layout.c). Launchers before 0.38 only know "boards": once a release is bigger than their 3 MB slots,
+ * "boards" names a bridge release (<= 3 MB, 0.38+) that moves the board, and "boards_big" the new one.
  * Each board takes its own entry. The top-level fields are the first board's
  * (guition_p4_43), where launchers from before per-board releases look.
  *
@@ -70,7 +74,9 @@ static void check_task(void *arg)
     free(body);
     /* This board's entry; the top level only stands for the first board */
     const char *id = bsp_info()->id;
-    cJSON *boards = cJSON_GetObjectItem(j, "boards"), *mine = cJSON_GetObjectItem(boards, id);
+    cJSON *boards = cJSON_GetObjectItem(j, "boards"), *big = cJSON_GetObjectItem(j, "boards_big");
+    if (cJSON_GetObjectItem(big, id) && !lx_update_layout_old()) boards = big;
+    cJSON *mine = cJSON_GetObjectItem(boards, id);
     bool legacy_ok = !boards && strcmp(id, "guition_p4_43") == 0;
     cJSON *e = mine ? mine : legacy_ok ? j : NULL;
     cJSON *v = cJSON_GetObjectItem(e, "version"), *u = cJSON_GetObjectItem(e, "url");

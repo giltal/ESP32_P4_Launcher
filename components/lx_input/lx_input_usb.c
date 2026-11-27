@@ -14,6 +14,7 @@
 #include <string.h>
 #include "esp_log.h"
 #include "esp_attr.h"
+#include "esp_timer.h"
 #include "usb/usb_host.h"
 #include "usb/hid_host.h"
 #include "hal/usb_dwc_hal.h"
@@ -143,9 +144,15 @@ typedef struct {
     bool waking;                    /* DS3 asleep: its wake-up press isn't HOME */
     bool has_layout;
     hid_layout_t layout;            /* from the report descriptor */
+    hid_state_t raw;                /* its controls, kept across reports (they may come in several) */
+    int pkind;                      /* PAPP_PAD_* */
+    lx_padmap_ext_t ext;            /* gamepads.txt: axis remaps */
+    uint32_t ext_gen;
 } dev_t;
 
-static dev_t s_devs[MAX_DEVS];
+/* PSRAM: 7 KB with the joystick state; internal RAM is short at start-up on v1.x chips (0.38 test build:
+ * 8 KB more there and the FreeRTOS timer task found no stack) */
+static EXT_RAM_BSS_ATTR dev_t s_devs[MAX_DEVS];
 static QueueHandle_t s_connect_q;
 static QueueHandle_t s_restart_q;          /* devices whose transfer failed */
 
@@ -193,8 +200,60 @@ static pad_fmt_t detect_format(const dev_t *d, const uint8_t *p, int len)
 static void parse_hid(dev_t *d, const uint8_t *p, int len)
 {
     lx_pad_state_t s;
-    if (lx_pad_layout(&d->layout, p, (size_t)len, &s))
-        lx_input_pad_update(d->player, s.b, s.lx, s.ly, s.rx, s.ry, s.lt, s.rt);
+    if (!lx_pad_layout(&d->layout, d->pkind, &d->raw, p, (size_t)len, &s)) return;
+    uint32_t gen = lx_input_pad_ext_gen(d->player);
+    if (gen != d->ext_gen) {                /* the mapping files changed: their axis lines again */
+        d->ext_gen = gen;
+        lx_input_pad_ext(d->player, &d->ext);
+    }
+    lx_pad_remap(&d->ext, &d->layout, &d->raw, &s);
+    lx_input_pad_update(d->player, s.b, s.lx, s.ly, s.rx, s.ry, s.lt, s.rt);
+    papp_joystick_t j = { 0 };
+    lx_pad_joystick(&d->layout, d->pkind, &d->raw, &j);
+    lx_input_pad_joystick(d->player, &j);
+}
+
+/* DualShock 4 (report 0x01, 64 bytes) and DualSense (0x01): gyro + accelerometer */
+static void sony_motion(dev_t *d, const uint8_t *p, int len)
+{
+    int at = d->fmt == FMT_PS4 ? 13 : 16;
+    if (len < at + 12 || p[0] != 0x01) return;
+    papp_motion_t m = { .valid = PAPP_MOTION_ACCEL | PAPP_MOTION_GYRO, .ir_x = 0xFFFF, .ir_y = 0xFFFF,
+                        .time_ms = (uint32_t)(esp_timer_get_time() / 1000) };
+    for (int i = 0; i < 3; i++) {
+        m.gyro[i] = (int16_t)(p[at + 2 * i] | p[at + 2 * i + 1] << 8);
+        m.accel[i] = (int16_t)((int16_t)(p[at + 6 + 2 * i] | p[at + 7 + 2 * i] << 8) / 2);  /* 8192 per g */
+    }
+    lx_input_pad_motion(d->player, &m);
+}
+
+/* Rumble and light bar by SET_REPORT (output; the data starts with the report id): DualShock 4 report
+ * 0x05, DualSense 0x02 (layouts as in Linux's hid-playstation) */
+static void sony_out(void *ctx, const lx_pad_out_state_t *s)
+{
+    dev_t *d = ctx;
+    uint8_t r[64] = { 0 };
+    esp_err_t e;
+    if (d->pid == 0x0CE6 || d->pid == 0x0DF2) {         /* DualSense (Edge) */
+        r[0] = 0x02;
+        r[1] = 0x03;                                    /* valid 0: rumble (compatible), haptics select */
+        r[2] = 0x04 | 0x10;                             /* valid 1: light bar, player LEDs */
+        r[3] = (uint8_t)(s->weak >> 8);
+        r[4] = (uint8_t)(s->strong >> 8);
+        r[39] = 0x02;                                   /* valid 2: light bar setup (ends the blue start-up glow) */
+        r[42] = 0x02;
+        r[44] = lx_pad_ps5_leds(s->player);
+        r[45] = s->r; r[46] = s->g; r[47] = s->b;
+        e = hid_class_request_set_report(d->handle, HID_REPORT_TYPE_OUTPUT, 0x02, r, 63);
+    } else {
+        r[0] = 0x05;
+        r[1] = 0x07;                                    /* rumble, light bar, flash */
+        r[4] = (uint8_t)(s->weak >> 8);
+        r[5] = (uint8_t)(s->strong >> 8);
+        r[6] = s->r; r[7] = s->g; r[8] = s->b;
+        e = hid_class_request_set_report(d->handle, HID_REPORT_TYPE_OUTPUT, 0x05, r, 32);
+    }
+    if (e != ESP_OK) ESP_LOGW(TAG, "player %d: output report failed: %s", d->player + 1, esp_err_to_name(e));
 }
 
 static void parse_pad(dev_t *d, const uint8_t *p, int len)
@@ -209,6 +268,7 @@ static void parse_pad(dev_t *d, const uint8_t *p, int len)
         parse_hid(d, p, len);
         return;
     }
+    if ((d->fmt == FMT_PS4 || d->fmt == FMT_PS5) && d->vid == 0x054C) sony_motion(d, p, len);
 
     uint32_t b = 0;
     int16_t lx = 0, ly = 0, rx = 0, ry = 0;
@@ -411,14 +471,20 @@ static void open_device(hid_host_device_handle_t h)
     } else if (params.proto == HID_PROTOCOL_NONE) {
         size_t dlen = 0;
         const uint8_t *desc = hid_host_get_report_descriptor(h, &dlen);
-        /* No descriptor: assume a gamepad, like the reference did */
-        if (!desc || desc_is_gamepad(desc, dlen)) d->kind = DEV_PAD;
+        d->has_layout = desc && hid_layout_parse(desc, dlen, &d->layout);
+        /* No descriptor: assume a gamepad, like the reference did. A joystick, wheel or pedals: the parser
+           found one */
+        if (!desc || d->has_layout || desc_is_gamepad(desc, dlen)) d->kind = DEV_PAD;
         else ESP_LOG_BUFFER_HEX_LEVEL(TAG, desc, dlen < 128 ? dlen : 128, ESP_LOG_DEBUG);   /* to see what it is */
         if (desc && d->kind == DEV_PAD) {
-            d->has_layout = hid_layout_parse(desc, dlen, &d->layout);
-            ESP_LOGI(TAG, "report descriptor %u bytes: %s, %d buttons, hat %d, id %d", (unsigned)dlen,
-                     d->has_layout ? "usable" : "not usable", d->layout.buttons,
-                     d->layout.hat.size != 0, d->layout.report_id);
+            static const char *const kinds[] = { "gamepad", "flight stick", "throttle", "wheel" };
+            d->pkind = d->has_layout ? lx_pad_kind(&d->layout) : PAPP_PAD_GAMEPAD;
+            hid_state_init(&d->raw);
+            int axes = 0;
+            for (int a = 0; a < HID_AX_COUNT; a++) axes += hid_has(&d->layout, a);
+            ESP_LOGI(TAG, "report descriptor %u bytes: %s, %s, %d axes, %d buttons, %d hats, ids %d", (unsigned)dlen,
+                     d->has_layout ? "usable" : "not usable", kinds[d->pkind & 3], axes, d->layout.buttons,
+                     d->layout.hats, d->layout.nids > 1 ? -d->layout.nids : d->layout.report_id);
         }
     }
     ESP_LOGI(TAG, "%04X:%04X iface proto %d -> %s", d->vid, d->pid, params.proto,
@@ -442,11 +508,21 @@ static void open_device(hid_host_device_handle_t h)
     if (d->kind == DEV_PAD) {
         char name[24];
         product_name(h, d->vid, d->pid, name, sizeof(name));
-        d->player = lx_input_pad_attach(name, d->vid, d->pid);
+        /* (pkind is a gamepad for the pads read by model: the layout isn't used for them) */
+        int kind = d->has_layout && d->vid != 0x054C ? d->pkind : PAPP_PAD_GAMEPAD;
+        d->pkind = kind;
+        d->player = lx_input_pad_attach_kind(name, d->vid, d->pid, kind);
+        if (d->player >= 0 && d->has_layout) {
+            int k = lx_input_pad_ext(d->player, &d->ext);   /* kind= of gamepads.txt applied */
+            if (k >= 0) d->pkind = k;
+            d->ext_gen = lx_input_pad_ext_gen(d->player);
+        }
         if (d->player < 0) d->kind = DEV_IGNORED;           /* all player slots taken */
         else if (d->vid == 0x054C && d->pid == 0x0268) {
             d->waking = true;
             ds3_enable(h);
+        } else if (d->vid == 0x054C && (d->pid == 0x05C4 || d->pid == 0x09CC || d->pid == 0x0CE6 || d->pid == 0x0DF2)) {
+            lx_input_pad_set_out(d->player, sony_out, d);
         }
     } else if (d->kind == DEV_KBD) {
         lx_input_kbd_attach();

@@ -1,0 +1,12 @@
+# wiimote: Wii Remote held sideways: d-pad left, 1 and 2 right (tools/make_pad_pictures.py; x,y,r or x,y,rx,ry in the 400x220 picture)
+UP=78,97,11
+DOWN=78,123,11
+LEFT=65,110,11
+RIGHT=91,110,11
+X=134,110,16
+SELECT=196,92,10
+HOME=196,110,10
+START=196,128,10
+B=290,110,14
+A=330,110,14
+Y=134,162,26

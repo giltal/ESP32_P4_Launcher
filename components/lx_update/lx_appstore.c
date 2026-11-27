@@ -7,12 +7,15 @@
  * apps.json: {"format":1, "folders":{"Emulators":{"icon":url}, ...},
  *             "apps":[{"id","name","version","folder","dir","file","url","size","sha256","icon"}],
  *             "gamepads":{"url","size","sha256"}, "gamenames":{"url","size","sha256"},
+ *             "pads":{"gamepad.png":{"url","size","sha256"}, ...},
  *             "codecs":{"h264":{"url","size","sha256","version"}, ...},
  *             "community":[{the app fields, "author","description","license","source"}]}
  * gamepads is the controller mapping database (SDcard/config/gamepads.txt in the
  * repository): fetching the catalogue also brings the card's copy up to date.
  * gamenames is the Neo Geo game name list (SDcard/roms/neogeo/gamenames.txt), the
  * same way, on cards that have a /sd/roms/neogeo folder.
+ * pads are the controller pictures and their button positions (SDcard/config/pads, tools/make_pad_pictures.py),
+ * kept in /sd/config/pads the same way (0.38+; files the catalogue doesn't name are left alone).
  * community lists apps shared without their source (community/ in the repository),
  * not reviewed: they come after the project's apps and always go to the Community folder.
  * codecs are the CODC modules (/sd/launcher/codecs/<name>.papp): an app's "needs":["h264"]
@@ -44,6 +47,7 @@ static const char *TAG = "lx_appstore";
 #define CHUNK         8192
 #define MAX_FOLDERS   8
 #define GAMEPADS_FILE "/sd/config/gamepads.txt"
+#define PADS_DIR      "/sd/config/pads"
 #define NEOGEO_DIR    "/sd/roms/neogeo"
 #define GAMENAMES_FILE NEOGEO_DIR "/gamenames.txt"
 #define ICON_DIR      "/sd/launcher/store"
@@ -197,6 +201,20 @@ static void data_files_sync(cJSON *j)
     parse_codecs(j);
     for (int i = 0; i < s_ncodecs; i++) codec_sync(i, true, false);
     s_pads_updated = data_sync(cJSON_GetObjectItem(j, "gamepads"), GAMEPADS_FILE, "gamepad database");
+    cJSON *pic;
+    bool made = false;
+    cJSON_ArrayForEach(pic, cJSON_GetObjectItem(j, "pads")) {
+        const char *n = pic->string;
+        size_t len = n ? strlen(n) : 0;
+        bool ok = len > 4 && len < 40;
+        for (size_t i = 0; ok && i < len; i++)          /* a plain name: no path */
+            ok = (n[i] >= 'a' && n[i] <= 'z') || (n[i] >= '0' && n[i] <= '9') || n[i] == '_' || n[i] == '.';
+        if (!ok || (strcmp(n + len - 4, ".png") && strcmp(n + len - 4, ".txt"))) continue;
+        if (!made) mkdir(PADS_DIR, 0775), made = true;
+        char path[64];
+        snprintf(path, sizeof(path), PADS_DIR "/%s", n);
+        data_sync(pic, path, n);
+    }
     struct stat st;
     if (stat(NEOGEO_DIR, &st) == 0 && S_ISDIR(st.st_mode))
         data_sync(cJSON_GetObjectItem(j, "gamenames"), GAMENAMES_FILE, "Neo Geo game names");

@@ -28,6 +28,7 @@ typedef struct {
     int player;
     bool gone;
     bool failed;                    /* IN transfer failed: endpoint halted, client_task restarts it */
+    uint8_t out_ep;                 /* interrupt OUT: LEDs, rumble */
 } xpad_t;
 
 static usb_host_client_handle_t s_client;
@@ -113,6 +114,22 @@ static void set_led(usb_device_handle_t dev, uint8_t ep, int player)
     t->num_bytes = 3;
     t->device_handle = dev;
     t->bEndpointAddress = ep;
+    t->callback = out_done;
+    t->context = NULL;
+    if (usb_host_transfer_submit(t) != ESP_OK) usb_host_transfer_free(t);
+}
+
+/* Rumble: [00][08][00][heavy][light][00][00][00] (the player LED was set at attach) */
+static void xpad_out(void *ctx, const lx_pad_out_state_t *s)
+{
+    xpad_t *p = ctx;
+    usb_transfer_t *t;
+    if (!p->dev || !p->out_ep || usb_host_transfer_alloc(32, 0, &t) != ESP_OK) return;
+    const uint8_t cmd[8] = { 0x00, 0x08, 0x00, (uint8_t)(s->strong >> 8), (uint8_t)(s->weak >> 8), 0, 0, 0 };
+    memcpy(t->data_buffer, cmd, sizeof(cmd));
+    t->num_bytes = sizeof(cmd);
+    t->device_handle = p->dev;
+    t->bEndpointAddress = p->out_ep;
     t->callback = out_done;
     t->context = NULL;
     if (usb_host_transfer_submit(t) != ESP_OK) usb_host_transfer_free(t);
@@ -226,6 +243,8 @@ static void open_pad(uint8_t addr)
     if (p->player >= 0) {
         start_request(dev, iface);
         if (out) set_led(dev, out, p->player);
+        p->out_ep = out;
+        if (out) lx_input_pad_set_out(p->player, xpad_out, p);
     }
     if (p->player < 0 || usb_host_transfer_submit(p->in) != ESP_OK) close_pad(p);
 }

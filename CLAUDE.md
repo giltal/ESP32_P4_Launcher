@@ -104,8 +104,17 @@ components/lx_input/      input manager: USB HID gamepads/keyboards, XInput (Xbo
                           to keep the root port full speed (FSLS only, 30 MHz clock, frint 29999, UTMI fc_06 FS EOP + LS preamble bits);
                           lx_hid_parse = HID descriptor parser; lx_padmap = per-pad button mapping as text on the card:
                           /sd/config/gamepads_mine.txt (Map controller) wins over /sd/config/gamepads.txt (shared database,
-                          SDcard/config/gamepads.txt, downloaded by the Store); NVS "padmap" = pre-0.23, read-only fallback
+                          SDcard/config/gamepads.txt, downloaded by the Store); NVS "padmap" = pre-0.23, read-only fallback;
+                          0.38 (docs/GAMEPAD_PLAN.md): axes by role, kinds (flight stick/throttle/wheel/Wii; a throttle joins
+                          the stick's player), INPT v4 joystick/motion/rumble, output task lx_padout (rumble + lights: Sony,
+                          Switch, XInput, Wii), lx_pad_wii.c, gamepads.txt kind=/pic=/axis remaps; pictures in /sd/config/pads
+                          (tools/make_pad_pictures.py -> SDcard/config/pads, Store "pads") shown by Map controller;
+                          lx_input's pad tables are in PSRAM (internal RAM is short at start-up on v1.x chips)
 components/lx_update/     self-update from /sd/update/launcher.bin + rollback confirm; online update (latest.json);
+                          lx_layout.c = one-time move from the pre-0.38 table (factory + 3 MB slots) to launcher/partitions.csv
+                          (two 6.5 MB slots, ota_0 at 0x20000), after the confirm; DevLink info slot/slot_size shows which;
+                          tests/host/test_layout.py = its table vs the csv; latest.json "boards_big" = what 0.38+ on the new
+                          layout installs, "boards" = old launchers (a bridge <= 3 MB release once images grow: make_release --bridge);
                           lx_appstore = app catalogue for the Store (apps.json on the "apps" release; icons cached in /sd/launcher/store;
                           codec modules: an app's "needs" installs them in /sd/launcher/codecs, a fetch updates the ones there)
 components/lx_net/        Wi-Fi station, NTP, time zone via the ESP32-C6 (esp_hosted 2.12.13 on the Guition boards, Tab5 and waveshare_p4_rpi_dsi, 1.4 on the Waveshare 3.5");
@@ -186,6 +195,7 @@ tools/perf_bench.py       Benchmark (apps/perf_bench: CoreMark, PSRAM/SRAM bandw
                           encodings: each faults on the other generation; SYS v4 papp_chip_rev() = major*100+minor tells
                           apps which, -1 before 0.33). e3d builds its SIMD set twice (e3d_simd_pie.c / _espv.c) and picks
                           one at e3d_create: one .papp for both. perf_bench = engine in C (-DE3D_NO_SIMD), perf_bench_simd
+tools/make_pad_pictures.py  Controller pictures by layout family + button positions -> SDcard/config/pads (Pillow)
 tools/build_c6_fw.py      C6 firmware matching a board's esp_hosted -> build/c6_fw/c6_<version>.bin (make_release adds it)
 tools/make_release.py     Release files: launcher.bin per board (Settings → Update) + launcher_<id>_full.bin (first install at 0x0,
                           ESP Tool web page) + latest.json, prints the gh command

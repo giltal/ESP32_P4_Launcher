@@ -1,0 +1,13 @@
+# throttle: Throttle: a lever with buttons on its handle (tools/make_pad_pictures.py; x,y,r or x,y,rx,ry in the 400x220 picture)
+UP=222,40,9
+DOWN=222,56,9
+LEFT=214,48,9
+RIGHT=230,48,9
+A=262,38,11
+B=274,60,11
+X=110,178,12
+Y=144,178,12
+L1=178,178,12
+R1=212,178,12
+SELECT=270,178,12,8
+START=300,178,12,8

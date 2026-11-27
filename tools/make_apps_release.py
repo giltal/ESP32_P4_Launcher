@@ -60,6 +60,7 @@ BASE = f"https://github.com/{REPO}/releases/download/{TAG}/"
 ICONS = os.path.join(ROOT, "apps", "common", "icons")
 GAMEPADS = os.path.join(ROOT, "SDcard", "config", "gamepads.txt")
 GAMENAMES = os.path.join(ROOT, "SDcard", "roms", "neogeo", "gamenames.txt")
+PADS = os.path.join(ROOT, "SDcard", "config", "pads")   # controller pictures (tools/make_pad_pictures.py)
 STORE = os.path.join(ROOT, "apps", "store.json")
 CATEGORIES = ("emulators", "games", "tools", "productivity", "education")
 FOLDERS = {"emu.": "Emulators", "game.": "Games", "edu.": "Education"}   # by app id prefix; others: main page
@@ -71,7 +72,8 @@ MANIFEST_MAGIC = 0x464E414D      # "MANF"
 MF_HIDDEN = 1 << 1
 CODECS = ("h264",)               # build/codecs/<name>/<name>.papp; the test modules (dummy) stay out
 # What the catalogue is made of besides the built apps: these must match origin/main when publishing
-SYNCED = ["community", "apps/store.json", "SDcard/config/gamepads.txt", "SDcard/roms/neogeo/gamenames.txt"]
+SYNCED = ["community", "apps/store.json", "SDcard/config/gamepads.txt", "SDcard/roms/neogeo/gamenames.txt",
+          "SDcard/config/pads"]
 
 
 def check_git_sync():
@@ -303,6 +305,20 @@ def main():
                                       sha256=sha256(GAMENAMES))
         names = sum(1 for line in open(GAMENAMES, encoding="utf-8") if "=" in line)
         print(f"gamenames.txt: {names} Neo Geo games")
+    if os.path.isdir(PADS):
+        # Controller pictures: "pads":{"gamepad.png":{url,size,sha256},...}; release assets get a "pad_" prefix.
+        # The launcher (0.38+) keeps /sd/config/pads like gamepads.txt
+        pads_map = {}
+        for name in sorted(os.listdir(PADS)):
+            src = os.path.join(PADS, name)
+            if not os.path.isfile(src) or not name.endswith((".png", ".txt")):
+                continue
+            shutil.copyfile(src, os.path.join(args.out, "pad_" + name))
+            files.append("pad_" + name)
+            pads_map[name] = dict(url=base + "pad_" + name, size=os.path.getsize(src), sha256=sha256(src))
+        if pads_map:
+            catalogue["pads"] = pads_map
+            print(f"pads: {len(pads_map)} picture files")
     with open(os.path.join(args.out, "apps.json"), "w") as f:
         json.dump(catalogue, f, indent=1)
     files.append("apps.json")

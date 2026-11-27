@@ -49,6 +49,7 @@ void lx_bt_testpad_init(void);
 /* lx_bt_pads.c */
 void lx_bt_pads_init(void);
 bool lx_bt_pads_owns(const uint8_t *bda);           /* a pad's link (BLE): not the app's */
+bool lx_bt_pads_pin(const uint8_t *bda, uint8_t *pin, uint8_t *len);   /* a Wii Remote's PIN: true + 6 bytes */
 void lx_bt_pads_app(bool active);                   /* lx_bt task: an app takes / lets go of BLE */
 void lx_bt_pads_cancel_open(void);                  /* lx_bt task: a pending BLE pad request makes way (scan) */
 uint32_t lx_bt_speaker_taken(void);             /* audio frames Bluedroid took for the speaker (status) */

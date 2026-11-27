@@ -830,6 +830,7 @@ void lx_svc_end_run(uint32_t *leaked_allocs, uint32_t *leaked_bytes, uint32_t *l
 {
     uint32_t na = 0, nb = 0, nf = 0;
     lx_svc_irq_end_run();       /* first: no interrupt may run app code or touch its memory after this */
+    lx_input_rumble_stop();     /* motors the app left running */
     for (uint32_t i = 0; i < s_ptr_cap; i++) {
         if (s_ptrs[i] > PTR_TOMB) {
             void *p = (void *)s_ptrs[i];

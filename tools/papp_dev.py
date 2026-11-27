@@ -52,7 +52,10 @@ RUN, STOP, STATUS = 0x30, 0x31, 0x32
 REBOOT, CRASH, CRASH_CLEAR, BOOTLOG = 0x40, 0x41, 0x42, 0x43
 NET, DISPLAY, BT = 0x52, 0x53, 0x54
 SHOT, INPUT = 0x50, 0x51
-INPUT_PAD, INPUT_KEY, INPUT_STATE, INPUT_UNMAP = 1, 2, 3, 4
+INPUT_PAD, INPUT_KEY, INPUT_STATE, INPUT_UNMAP, INPUT_RUMBLE = 1, 2, 3, 4, 5
+PAD_KINDS = ["gamepad", "flight stick", "throttle", "wheel", "Wii Remote", "Wii Remote + Nunchuk", "arcade", "other"]
+AXIS_ROLES = ["X", "Y", "Z", "Rx", "Ry", "Rz", "Slider", "Dial", "Wheel", "Throttle", "Rudder", "Steering",
+              "Accel", "Brake", "Slider2", "LT", "RT"]
 
 # PAPP_BTN_* bit positions (papp_abi.h)
 BUTTONS = {"A": 0, "B": 1, "X": 2, "Y": 3, "L1": 4, "R1": 5, "L2": 6, "R2": 7, "SELECT": 8,
@@ -76,6 +79,23 @@ def buttons_mask(spec):
 
 def buttons_names(mask):
     return " ".join(n for n, b in BUTTONS.items() if mask & (1 << b)) or "-"
+
+
+def joystick_line(pl):
+    """INPT v4 view of a player (launcher >= 0.38): kind, every axis by role, hats, buttons by number, motion."""
+    if "kind" not in pl:
+        return ""
+    kind = PAD_KINDS[pl["kind"]] if pl["kind"] < len(PAD_KINDS) else str(pl["kind"])
+    axes = " ".join(f"{AXIS_ROLES[r] if r < len(AXIS_ROLES) else r}={v}" for r, v in pl["axes"])
+    hats = ",".join(str(h) for h in pl["hats"] if h >= 0)
+    pressed = [str(i + 1) for i in range(32) if pl["raw"] >> i & 1]
+    line = f" [{kind}{' rumble' if pl['flags'] & 1 else ''}{' joined' if pl['flags'] & 8 else ''}: {axes}"
+    if hats:
+        line += f" hat {hats}"
+    line += f" buttons {','.join(pressed) or '-'}/{pl['nbuttons']}"
+    if "accel" in pl:
+        line += f" accel {pl['accel']} gyro {pl['gyro']}"
+    return line + "]"
 
 
 def key_usage(name):
@@ -533,11 +553,12 @@ def main():
     p = sub.add_parser("shot"); p.add_argument("out", nargs="?", default="screenshot.png")
     p = sub.add_parser("log"); p.add_argument("--seconds", type=float, default=0)
     p = sub.add_parser("input", help="inject input or read the input state")
-    p.add_argument("what", choices=["state", "pad", "key", "text", "unmap"])
+    p.add_argument("what", choices=["state", "pad", "key", "text", "unmap", "rumble"])
     p.add_argument("value", nargs="?", help="pad: A+START ...; key: ENTER, a, 0x28; text: string")
     p.add_argument("--player", type=int, default=0)
     p.add_argument("--hold", type=int, default=100, help="ms")
     p.add_argument("--watch", type=float, default=0, help="state: print changes for N seconds")
+    p.add_argument("--all", action="store_true", help="state: also every axis, hat and button (INPT v4)")
     p = sub.add_parser("deploy")
     p.add_argument("file"); p.add_argument("--dest"); p.add_argument("--timeout", type=float, default=30)
     p.add_argument("--inject", action="append", metavar="MS:KIND:VALUE",
@@ -631,6 +652,8 @@ def main():
                         if pl["connected"]:
                             line += (f" | P{i + 1} {pl['name']}: {buttons_names(pl['buttons'])} "
                                      f"L({pl['lx']},{pl['ly']}) R({pl['rx']},{pl['ry']}) T({pl['lt']},{pl['rt']})")
+                            if args.all:
+                                line += joystick_line(pl)
                     if st.get("paddle", -1) >= 0:
                         line += f" | paddle {st['paddle'] >> 10}"    # 0..63: hides ADC noise
                     if line != last:
@@ -639,6 +662,11 @@ def main():
                     if time.time() >= end:
                         break
                     time.sleep(0.05)
+            elif args.what == "rumble":                 # value = strong,weak,ms (0..65535, ms 0 = until changed)
+                parts = [int(x, 0) for x in (args.value or "40000,40000,500").split(",")]
+                strong, weak, ms = (parts + [40000, 40000, 500][len(parts):])[:3]
+                r = dl.request(INPUT, bytes([INPUT_RUMBLE, args.player]) + struct.pack("<HHI", strong, weak, ms))
+                print(f"player {args.player + 1}: {r.decode()}")
             elif args.what == "unmap":                  # forget the pad's saved button mapping
                 dl.request(INPUT, bytes([INPUT_UNMAP, args.player]))
                 print(f"player {args.player + 1}: default buttons")

@@ -148,6 +148,20 @@ int      papp_input_analog(int ch);
 /* Whether a keyboard is attached now (a USB keyboard, or one the board has of its own): an app can lay out
  * on-screen keys only when there is none. False on a launcher too old to say. */
 bool     papp_input_keyboard(void);
+/* Every control of a pad, flight stick, throttle or wheel (launcher >= 0.38, INPT v4): its kind, up to 8 axes
+ * each with its role (PAPP_AXIS_THROTTLE ...), 32 buttons by number, 2 hats. On an older launcher it is
+ * made from papp_input_gamepad. papp_input_gamepad keeps working for every device: a flight stick there has
+ * X/Y = left stick, twist = right stick X, throttle = right stick Y and RT, trigger = A.
+ *   papp_joystick_t j;
+ *   if (papp_input_joystick(0, &j)) for (int i = 0; i < j.naxes; i++)
+ *       if (j.role[i] == PAPP_AXIS_THROTTLE || j.role[i] == PAPP_AXIS_SLIDER) throttle = j.axis[i];   */
+bool     papp_input_joystick(int player, papp_joystick_t *out);
+/* Accelerometer / gyro of pads that have them (DualShock 4, DualSense, Wii Remote); false otherwise */
+bool     papp_input_motion(int player, papp_motion_t *out);
+/* Vibration: strong = the heavy motor, weak = the light one, 0..65535, for ms (0 = until the next call).
+ * Stops when the app ends. False if the pad has no motors or the launcher predates INPT v4.
+ *   papp_input_rumble(0, 40000, 20000, 200);      // a short hit */
+bool     papp_input_rumble(int player, uint16_t strong, uint16_t weak, uint32_t ms);
 
 /* ── Threads ────────────────────────────────────────────────────────────────
  * NULL / false when the launcher has no THRD. cfg may be NULL (8 KB internal

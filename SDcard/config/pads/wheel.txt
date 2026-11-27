@@ -1,0 +1,15 @@
+# wheel: Wheel: buttons on the spokes, paddles behind, pedals (tools/make_pad_pictures.py; x,y,r or x,y,rx,ry in the 400x220 picture)
+UP=172,104,9
+DOWN=172,120,9
+LEFT=164,112,9
+RIGHT=180,112,9
+A=228,124,9
+B=240,112,9
+X=216,112,9
+Y=228,100,9
+SELECT=186,132,10,8
+START=214,132,10,8
+L1=100,89,12,23
+R1=300,89,12,23
+L2=44,178,24,32
+R2=356,178,24,32

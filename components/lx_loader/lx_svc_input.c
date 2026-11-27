@@ -48,6 +48,31 @@ static int inpt_analog(int ch)
     return lx_input_analog(ch);
 }
 
+static bool inpt_joystick(int player, papp_joystick_t *out)
+{
+    SVC_ENTER();
+    bool c = lx_input_joystick(player, out);
+    SVC_LEAVE();
+    return c;
+}
+
+static bool inpt_motion(int player, papp_motion_t *out)
+{
+    SVC_ENTER();
+    bool c = lx_input_motion(player, out);
+    SVC_LEAVE();
+    return c;
+}
+
+/* The lx_padout task sends it; motors stop at teardown (lx_svc_end_run) */
+static bool inpt_rumble(int player, uint16_t strong, uint16_t weak, uint32_t ms)
+{
+    SVC_ENTER();
+    bool c = lx_input_rumble(player, strong, weak, ms);
+    SVC_LEAVE();
+    return c;
+}
+
 const papp_if_inpt_t lx_if_inpt = {
     .hdr = { PAPP_IF_INPT, PAPP_IF_INPT_VER, sizeof(papp_if_inpt_t) },
     .gamepad    = inpt_gamepad,
@@ -57,4 +82,7 @@ const papp_if_inpt_t lx_if_inpt = {
     .flush      = inpt_flush,
     .analog     = inpt_analog,
     .keyboard   = inpt_keyboard,
+    .joystick   = inpt_joystick,
+    .motion     = inpt_motion,
+    .rumble     = inpt_rumble,
 };

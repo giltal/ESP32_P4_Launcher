@@ -7,6 +7,9 @@
 !.gitkeep
 !README.md
 !config/gamepads.txt
+!config/pads/
+!config/pads/*.png
+!config/pads/*.txt
 !apps/Education/**
 !Tyrian/data/**
 !roms/doom/doom1.wad

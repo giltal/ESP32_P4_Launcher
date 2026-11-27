@@ -823,11 +823,78 @@ static uint8_t s_map[LX_INPUT_MAP_BITS];
 static bool s_map_armed;                /* all released since the last step */
 static int64_t s_map_since;
 
+/* The pad's picture (/sd/config/pads/<name>.png, 400x220) and where each function is (<name>.txt:
+ * "A=x,y,r" or "L1=x,y,rx,ry", tools/make_pad_pictures.py); the step's button gets a ring */
+#define PADS_DIR "/sd/config/pads"
+static lv_obj_t *s_map_pic, *s_map_ring;
+static struct { char fn[8]; int16_t x, y, rx, ry; } s_map_pos[24];
+static int s_map_npos;
+
+static const char *map_fn_name(int bit)
+{
+    static const char *const n[LX_INPUT_MAP_BITS] = {
+        "A", "B", "X", "Y", "L1", "R1", "L2", "R2", "SELECT", "START", "L3", "R3", "HOME", "", "", "",
+        "UP", "DOWN", "LEFT", "RIGHT",
+    };
+    return bit >= 0 && bit < LX_INPUT_MAP_BITS ? n[bit] : "";
+}
+
+static void map_load_picture(void)
+{
+    char name[24], path[64];
+    s_map_npos = 0;
+    lv_obj_add_flag(s_map_pic, LV_OBJ_FLAG_HIDDEN);
+    if (!lx_input_pad_picture(s_map_player, name, sizeof(name))) return;
+    snprintf(path, sizeof(path), "S:" PADS_DIR "/%s.png", name);
+    lv_image_header_t h;
+    if (lv_image_decoder_get_info(path, &h) != LV_RESULT_OK) {
+        ESP_LOGI(TAG, "map: no picture %s", path);
+        return;
+    }
+    lv_image_set_src(s_map_pic, path);
+    lv_obj_remove_flag(s_map_pic, LV_OBJ_FLAG_HIDDEN);
+    snprintf(path, sizeof(path), PADS_DIR "/%s.txt", name);
+    FILE *f = fopen(path, "r");
+    char line[64];
+    while (f && fgets(line, sizeof(line), f) && s_map_npos < (int)(sizeof(s_map_pos) / sizeof(s_map_pos[0]))) {
+        char fn[8];
+        int x, y, rx, ry = -1;
+        int n = sscanf(line, "%7[A-Z0-9]=%d,%d,%d,%d", fn, &x, &y, &rx, &ry);
+        if (n < 4) continue;
+        typeof(s_map_pos[0]) *p = &s_map_pos[s_map_npos++];
+        snprintf(p->fn, sizeof(p->fn), "%s", fn);
+        p->x = x, p->y = y, p->rx = rx, p->ry = n == 5 ? ry : rx;
+    }
+    if (f) fclose(f);
+}
+
+/* the picture moves the prompt below it */
+static void map_layout(bool pic)
+{
+    lv_obj_align(s_map_prompt, LV_ALIGN_CENTER, 0, pic ? 66 : -40);
+    lv_obj_align(s_map_hint, LV_ALIGN_CENTER, 0, pic ? 112 : 20);
+    lv_obj_align(s_map_bar, LV_ALIGN_CENTER, 0, pic ? 134 : 70);
+}
+
+static void map_ring(int bit)
+{
+    const char *fn = map_fn_name(bit);
+    lv_obj_add_flag(s_map_ring, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < s_map_npos && fn[0]; i++) {
+        if (strcmp(s_map_pos[i].fn, fn)) continue;
+        lv_obj_set_pos(s_map_ring, s_map_pos[i].x - s_map_pos[i].rx - 3, s_map_pos[i].y - s_map_pos[i].ry - 3);
+        lv_obj_set_size(s_map_ring, 2 * s_map_pos[i].rx + 6, 2 * s_map_pos[i].ry + 6);
+        lv_obj_remove_flag(s_map_ring, LV_OBJ_FLAG_HIDDEN);
+        break;
+    }
+}
+
 static void map_show_step(void)
 {
     char buf[48];
     snprintf(buf, sizeof(buf), "Press %s", k_map_steps[s_map_step].name);
     lv_label_set_text(s_map_prompt, buf);
+    map_ring(k_map_steps[s_map_step].bit);
     snprintf(buf, sizeof(buf), "Step %d of %d. No such button? Wait a moment.", s_map_step + 1, MAP_STEPS);
     lv_label_set_text(s_map_hint, buf);
     lv_bar_set_value(s_map_bar, s_map_step, LV_ANIM_OFF);
@@ -887,6 +954,8 @@ static void on_map_start(lv_event_t *ev)
     s_map_armed = false;
     s_map_step = 0;
     focus_clear_list();
+    map_load_picture();
+    map_layout(!lv_obj_has_flag(s_map_pic, LV_OBJ_FLAG_HIDDEN));
     lv_screen_load(s_map_scr);
     map_show_step();
 }
@@ -926,6 +995,16 @@ static void build_map_screen(void)
     lv_obj_align(s_map_bar, LV_ALIGN_CENTER, 0, 70);
     lv_bar_set_range(s_map_bar, 0, MAP_STEPS);
     lv_obj_set_style_bg_color(s_map_bar, C_BLUE, LV_PART_INDICATOR);
+    s_map_pic = lv_image_create(s_map_scr);
+    lv_obj_set_size(s_map_pic, 400, 220);
+    lv_obj_align(s_map_pic, LV_ALIGN_TOP_MID, 0, 56 + s_dy / 2);
+    lv_obj_add_flag(s_map_pic, LV_OBJ_FLAG_HIDDEN);
+    s_map_ring = lv_obj_create(s_map_pic);
+    lv_obj_remove_style_all(s_map_ring);
+    lv_obj_set_style_radius(s_map_ring, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(s_map_ring, 4, 0);
+    lv_obj_set_style_border_color(s_map_ring, C_ORANGE, 0);
+    lv_obj_add_flag(s_map_ring, LV_OBJ_FLAG_HIDDEN);
     static const struct { const char *text; int x; lv_event_cb_t cb; } b[] = {
         { "Cancel", 200, on_map_cancel }, { "Reset to default", 420, on_map_reset },
     };
@@ -3035,13 +3114,47 @@ static void autostart_tick(void)
     snprintf(s_launch, sizeof(s_launch), "%s", s_auto);
 }
 
+/* Once, on a launcher that still has the old partition table (lx_layout.c): two 6.5 MB slots */
+static void layout_progress(int percent)
+{
+    char buf[160];
+    snprintf(buf, sizeof(buf), "Moving the launcher to the bigger flash layout.\n"
+             "Don't turn the board off (about 30 s).\n\n%d%%", percent);
+    lv_label_set_text(s_upd_text, buf);
+    lv_refr_now(s_disp);
+}
+
+static void layout_move(void)
+{
+    if (!lx_update_layout_old()) return;
+    upd_box("", false);
+    layout_progress(0);
+    esp_err_t err = lx_update_layout_migrate(layout_progress);
+    if (err == ESP_OK) {
+        lv_label_set_text(s_upd_text, "Done. Restarting...");
+        lv_refr_now(s_disp);
+        vTaskDelay(pdMS_TO_TICKS(800));
+        esp_restart();
+    }
+    lv_msgbox_close(s_upd_box);
+    s_upd_box = s_upd_text = NULL;
+    char buf[200];
+    snprintf(buf, sizeof(buf), "The flash layout was not changed (%s). If the board doesn't start after the next "
+             "restart, flash the full image over USB.", esp_err_to_name(err));
+    upd_message(LV_SYMBOL_WARNING "  Flash layout", buf);
+}
+
 static void home_task(void *arg)
 {
-    bool was_running = false, confirmed = false, offered = false;
+    bool was_running = false, confirmed = false, offered = false, layout = false;
     for (;;) {
         if (!confirmed && esp_timer_get_time() > CONFIRM_AFTER_US) {
             lx_update_confirm();
             confirmed = true;
+        }
+        if (confirmed && !layout && lx_app_state() == LX_APP_IDLE && !s_upd_box) {
+            layout = true;
+            layout_move();
         }
         if (lx_app_state() != LX_APP_IDLE) {
             s_last_input = esp_timer_get_time();

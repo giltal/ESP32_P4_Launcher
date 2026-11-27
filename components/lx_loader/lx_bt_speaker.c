@@ -484,7 +484,10 @@ static void gap_cb(esp_bt_gap_cb_event_t ev, esp_bt_gap_cb_param_t *p)
         break;
     case ESP_BT_GAP_PIN_REQ_EVT: {
         esp_bt_pin_code_t pin = { '0', '0', '0', '0' };
-        if (p->pin_req.min_16_digit) {
+        uint8_t n = 0;
+        if (lx_bt_pads_pin(p->pin_req.bda, pin, &n)) {      /* a Wii Remote */
+            esp_bt_gap_pin_reply(p->pin_req.bda, true, n, pin);
+        } else if (p->pin_req.min_16_digit) {
             memset(pin, '0', sizeof(pin));
             esp_bt_gap_pin_reply(p->pin_req.bda, true, 16, pin);
         } else {

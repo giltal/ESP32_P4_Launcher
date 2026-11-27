@@ -7,6 +7,15 @@
  * that is not itself ("-" = ignored), then the pad's name. Button names are the
  * PAPP_BTN_ ones: A B X Y L1 R1 L2 R2 SELECT START L3 R3 HOME MISC UP DOWN LEFT RIGHT.
  *
+ * Since 0.38 a line may also carry (older launchers warn about these and go on):
+ *   kind=gamepad|flightstick|throttle|wheel|arcade   what the device is (else guessed from its axes)
+ *   <axis>=<stick>   an axis of the device (X Y Z RX RY RZ SLIDER DIAL WHEEL THROTTLE RUDDER STEERING ACCEL
+ *                    BRAKE SLIDER2) to a stick or trigger of the standard pad (LX LY RX RY LT RT; "-RY" =
+ *                    inverted, "-" = none). For devices read by their HID descriptor
+ *   pic=<name>       the picture in /sd/config/pads (else the kind's)
+ * for example
+ *   044F:B10A  kind=flightstick SLIDER=-RY RZ=RX pic=flightstick  # a flight stick
+ *
  * /sd/config/gamepads_mine.txt  written by Settings -> Map controller; wins
  * /sd/config/gamepads.txt       the shared database (SDcard/config/gamepads.txt
  *                               in the repository, updated by the Store)
@@ -42,8 +51,53 @@ static int name_bit(const char *s, size_t n)
     return -1;
 }
 
-/* Line for vid:pid? Then fills map (identity, then the line's changes). */
-static bool parse_line(const char *line, uint16_t vid, uint16_t pid, uint8_t *map)
+/* HID_AX_ order */
+static const char *const k_axes[HID_AX_COUNT] = {
+    "X", "Y", "Z", "RX", "RY", "RZ", "SLIDER", "DIAL", "WHEEL", "THROTTLE", "RUDDER", "STEERING", "ACCEL",
+    "BRAKE", "SLIDER2",
+};
+static const char *const k_sticks[] = { "LX", "LY", "RX", "RY", "LT", "RT" };     /* LX_PADAX_ */
+static const char *const k_kinds[] = { "gamepad", "flightstick", "throttle", "wheel", NULL, NULL, "arcade" };
+
+static int name_in(const char *const *t, int n, const char *s, size_t len)
+{
+    for (int i = 0; i < n; i++)
+        if (t[i] && strlen(t[i]) == len && strncasecmp(t[i], s, len) == 0) return i;
+    return -1;
+}
+
+static bool is_key(const char *s, size_t n, const char *key)
+{
+    return strlen(key) == n && strncasecmp(key, s, n) == 0;
+}
+
+/* A key of the 0.38 additions (kind, pic, an axis)? */
+static bool ext_key(const char *s, size_t n)
+{
+    return is_key(s, n, "kind") || is_key(s, n, "pic") || name_in(k_axes, HID_AX_COUNT, s, n) >= 0;
+}
+
+/* One token key=value of the additions into *e */
+static void ext_token(lx_padmap_ext_t *e, const char *k, size_t kn, const char *v, size_t vn)
+{
+    int ax;
+    if (is_key(k, kn, "kind")) {
+        int kind = name_in(k_kinds, (int)(sizeof(k_kinds) / sizeof(k_kinds[0])), v, vn);
+        if (kind >= 0) e->kind = (int8_t)kind;
+    } else if (is_key(k, kn, "pic")) {
+        snprintf(e->pic, sizeof(e->pic), "%.*s", (int)vn, v);
+    } else if ((ax = name_in(k_axes, HID_AX_COUNT, k, kn)) >= 0 && e->naxis < LX_PADMAP_AXES) {
+        bool inv = vn > 1 && *v == '-';
+        int to = vn == 1 && *v == '-' ? 0xFF : name_in(k_sticks, 6, v + inv, vn - inv);
+        if (to < 0) return;
+        e->axis[e->naxis].role = (uint8_t)ax;
+        e->axis[e->naxis].to = (uint8_t)to;
+        e->axis[e->naxis++].inv = inv;
+    }
+}
+
+/* Line for vid:pid? Then fills map (identity, then the line's changes) and *ext (when not NULL). */
+static bool parse_line_ext(const char *line, uint16_t vid, uint16_t pid, uint8_t *map, lx_padmap_ext_t *ext)
 {
     while (*line == ' ' || *line == '\t') line++;
     unsigned v, p;
@@ -62,11 +116,36 @@ static bool parse_line(const char *line, uint16_t vid, uint16_t pid, uint8_t *ma
             int from = name_bit(s, eq - s);
             int to = (end - val == 1 && *val == '-') ? 0xFF : name_bit(val, end - val);
             if (from >= 0 && to != -1) map[from] = (uint8_t)to;
+            else if (ext_key(s, eq - s)) { if (ext) ext_token(ext, s, eq - s, val, end - val); }
             else ESP_LOGW(TAG, "%04X:%04X: '%.*s' not understood", vid, pid, (int)(end - s), s);
         }
         s = end;
     }
     return true;
+}
+
+static bool parse_line(const char *line, uint16_t vid, uint16_t pid, uint8_t *map)
+{
+    return parse_line_ext(line, vid, pid, map, NULL);
+}
+
+/* The additions' tokens of a line, as text (kept when Map controller rewrites the line) */
+static void ext_text(const char *line, char *out, size_t cap)
+{
+    size_t n = 0;
+    out[0] = 0;
+    const char *s = line;
+    while (*s && *s != ' ' && *s != '\t') s++;          /* VID:PID */
+    for (;;) {
+        while (*s == ' ' || *s == '\t') s++;
+        if (!*s || *s == '#' || *s == '\r' || *s == '\n') break;
+        const char *eq = s, *end;
+        while (*eq && *eq != '=' && !isspace((unsigned char)*eq)) eq++;
+        for (end = eq; *end && !isspace((unsigned char)*end) && *end != '#'; end++) {}
+        if (*eq == '=' && ext_key(s, eq - s) && n + (end - s) + 2 < cap)
+            n += snprintf(out + n, cap - n, " %.*s", (int)(end - s), s);
+        s = end;
+    }
 }
 
 static bool load_from(const char *path, uint16_t vid, uint16_t pid, uint8_t *map)
@@ -78,6 +157,28 @@ static bool load_from(const char *path, uint16_t vid, uint16_t pid, uint8_t *map
     while (!found && fgets(line, sizeof(line), f)) found = parse_line(line, vid, pid, map);
     fclose(f);
     return found;
+}
+
+static bool ext_from(const char *path, uint16_t vid, uint16_t pid, lx_padmap_ext_t *ext)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+    char line[LINE_MAX_];
+    uint8_t map[LX_INPUT_MAP_BITS];
+    bool found = false;
+    while (!found && fgets(line, sizeof(line), f)) found = parse_line_ext(line, vid, pid, map, ext);
+    fclose(f);
+    return found;
+}
+
+bool lx_padmap_ext(uint16_t vid, uint16_t pid, lx_padmap_ext_t *ext)
+{
+    memset(ext, 0, sizeof(*ext));
+    ext->kind = -1;
+    if (ext_from(MINE_FILE, vid, pid, ext)) return true;
+    memset(ext, 0, sizeof(*ext));
+    ext->kind = -1;
+    return ext_from(DB_FILE, vid, pid, ext);
 }
 
 int lx_padmap_load(uint16_t vid, uint16_t pid, uint8_t *map)
@@ -106,17 +207,19 @@ esp_err_t lx_padmap_save(uint16_t vid, uint16_t pid, const char *name, const uin
     if (!n) fputs("# Your controller mappings (Settings -> Map controller). To share one, add its line to\n"
                   "# SDcard/config/gamepads.txt in https://github.com/giltal/ESP32_P4_Launcher\n", f);
     uint8_t scratch[LX_INPUT_MAP_BITS];
+    char extra[128] = "";
     for (char *line = old; line < old + n;) {                /* keep every other pad's line */
         char *next = strchr(line, '\n');
         next = next ? next + 1 : old + n;
         if (!parse_line(line, vid, pid, scratch)) fwrite(line, 1, next - line, f);
+        else ext_text(line, extra, sizeof(extra));          /* this pad's kind, axes, picture stay */
         line = next;
     }
-    if (map) {
+    if (map || extra[0]) {
         fprintf(f, "%04X:%04X ", vid, pid);
-        for (int i = 0; i < LX_INPUT_MAP_BITS; i++)
+        for (int i = 0; map && i < LX_INPUT_MAP_BITS; i++)
             if (map[i] != i) fprintf(f, " %s=%s", k_names[i], map[i] < LX_INPUT_MAP_BITS ? k_names[map[i]] : "-");
-        fprintf(f, "  # %s\n", name && name[0] ? name : "unnamed controller");
+        fprintf(f, "%s  # %s\n", extra, name && name[0] ? name : "unnamed controller");
     }
     free(old);
     bool ok = fclose(f) == 0;

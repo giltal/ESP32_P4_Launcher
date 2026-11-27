@@ -32,6 +32,7 @@
 #include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "esp_app_desc.h"
+#include "esp_ota_ops.h"
 #include "ff.h"
 #include "diskio_sdmmc.h"
 #include "esp_core_dump.h"
@@ -273,6 +274,9 @@ static void h_info(uint16_t seq)
     jstr(&j, lx_c6_host_version());
     int64_t rtc = -1;
     bsp_rtc_get(&rtc);                      /* -1: no RTC, or it lost the time */
+    const esp_partition_t *run = esp_ota_get_running_partition();      /* slot size 0x680000 = new layout */
+    if (run) jcat(&j, ",\"slot\":\"%s\",\"slot_addr\":%lu,\"slot_size\":%lu", run->label,
+                  (unsigned long)run->address, (unsigned long)run->size);
     jcat(&j, ",\"time\":%lld,\"rtc\":%lld,\"reset_reason\":%d}", (long long)time(NULL), (long long)rtc,
          (int)esp_reset_reason());
     reply(DL_INFO, seq, j.buf, j.len);
@@ -564,6 +568,10 @@ static void h_input(uint16_t seq, const uint8_t *p, uint32_t len)
     } else if (len >= 2 && p[0] == DL_INPUT_UNMAP) {
         lx_input_pad_set_map(p[1], NULL);           /* back to the pad's own layout */
         reply(DL_INPUT, seq, NULL, 0);
+    } else if (len >= 10 && p[0] == DL_INPUT_RUMBLE) {
+        uint16_t strong = (uint16_t)(p[2] | p[3] << 8), weak = (uint16_t)(p[4] | p[5] << 8);
+        uint32_t ms = (uint32_t)p[6] | (uint32_t)p[7] << 8 | (uint32_t)p[8] << 16 | (uint32_t)p[9] << 24;
+        reply_str(DL_INPUT, seq, lx_input_rumble(p[1], strong, weak, ms) ? "ok" : "no motors");
     } else if (len >= 1 && p[0] == DL_INPUT_STATE) {
         jbuf_t j = { .buf = s_tx, .cap = DL_MAX_PAYLOAD };
         char desc[128];
@@ -576,8 +584,20 @@ static void h_input(uint16_t seq, const uint8_t *p, uint32_t len)
             bool c = lx_input_gamepad(i, &g);
             jcat(&j, "%s{\"connected\":%s,\"name\":", i ? "," : "", c ? "true" : "false");
             jstr(&j, g.name);
-            jcat(&j, ",\"buttons\":%lu,\"lx\":%d,\"ly\":%d,\"rx\":%d,\"ry\":%d,\"lt\":%u,\"rt\":%u}",
+            jcat(&j, ",\"buttons\":%lu,\"lx\":%d,\"ly\":%d,\"rx\":%d,\"ry\":%d,\"lt\":%u,\"rt\":%u",
                  (unsigned long)g.buttons, g.lx, g.ly, g.rx, g.ry, g.lt, g.rt);
+            papp_joystick_t js;                     /* every control (INPT v4) */
+            if (c && lx_input_joystick(i, &js)) {
+                jcat(&j, ",\"kind\":%u,\"flags\":%u,\"raw\":%lu,\"nbuttons\":%u,\"hats\":[%d,%d],\"axes\":[",
+                     js.kind, js.flags, (unsigned long)js.buttons, js.nbuttons, js.hat[0], js.hat[1]);
+                for (int a = 0; a < js.naxes; a++) jcat(&j, "%s[%u,%d]", a ? "," : "", js.role[a], js.axis[a]);
+                jcat(&j, "]");
+                papp_motion_t m;
+                if (lx_input_motion(i, &m))
+                    jcat(&j, ",\"accel\":[%d,%d,%d],\"gyro\":[%d,%d,%d]", m.accel[0], m.accel[1], m.accel[2],
+                         m.gyro[0], m.gyro[1], m.gyro[2]);
+            }
+            jcat(&j, "}");
         }
         jcat(&j, "]}");
         reply(DL_INPUT, seq, j.buf, j.len);

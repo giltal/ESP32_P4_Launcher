@@ -53,7 +53,8 @@ enum {
 #define DL_SHOT_FMT_RGB565_RLE16  1
 
 /* INPUT: first byte selects the request */
-enum { DL_INPUT_PAD = 1, DL_INPUT_KEY = 2, DL_INPUT_STATE = 3, DL_INPUT_UNMAP = 4 };   /* UNMAP: u8 player */
+enum { DL_INPUT_PAD = 1, DL_INPUT_KEY = 2, DL_INPUT_STATE = 3, DL_INPUT_UNMAP = 4,   /* UNMAP: u8 player */
+       DL_INPUT_RUMBLE = 5 };   /* RUMBLE: u8 player, u16 strong, u16 weak, u32 ms; reply "ok" or "no motors" */
 
 typedef struct __attribute__((packed)) {
     uint8_t  kind;            /* DL_INPUT_PAD                 */

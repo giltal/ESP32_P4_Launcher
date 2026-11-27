@@ -57,7 +57,7 @@ way. We keep that mechanism. What needs to change is everything around it:
 │  │ + optional libs      │  │ crt0 · libc glue · interface stubs · SDL-lite│  │
 │  └──────────────────────┘  └──────────────────────────────────────────────┘  │
 ╞═════════════════════════  PAPP ABI v2 (interfaces)  ═════════════════════════╡
-│  LAUNCHER CORE  (board-agnostic, ESP-IDF application in the factory slot)   │
+│  LAUNCHER CORE  (board-agnostic, ESP-IDF application in an OTA slot)        │
 │  ┌────────────┐ ┌──────────────┐ ┌────────────┐ ┌───────────┐ ┌───────────┐  │
 │  │ Loader /   │ │ App Manager  │ │ Service    │ │ Launcher  │ │ Dev tools │  │
 │  │ Relocator  │ │ lifecycle,   │ │ registry   │ │ UI (LVGL) │ │ upload/run│  │
@@ -391,6 +391,18 @@ now it's in one SDK place backed by a real `FS.stat`). FATFS LFN config stays ma
   to another folder updates the file.
 - **Self-update**: launcher A/B OTA from `/sd/update/launcher.bin` (the OTA partitions are no longer
   needed for emulators once they are PAPPs).
+- **Flash layout** (`launcher/partitions.csv`, since 0.38): nvs, otadata, ota_0 0x20000 and ota_1 0x6A0000
+  (6.5 MB each), coredump 0xD20000; 0xD60000.. free. Before 0.38: factory 0x20000 + ota_0/ota_1 of 3 MB,
+  coredump 0x920000. `lx_layout.c` (lx_update) moves an old board once, from the home task after the 10 s
+  confirm: copy the running image to 0x20000 if it runs from an update slot (hash checked there), erase the new
+  coredump area, erase otadata (the old table then boots 0x20000), then erase + write the table sector (its MD5
+  entry built like gen_esp32part, read back; `esp_flash_set_dangerous_write_protection` off for it) and restart:
+  no otadata + no factory = ota_0 = 0x20000. Only a power cut during the table write needs a USB reflash.
+  `tests/host/test_layout.py` checks that `k_new[]` matches partitions.csv.
+  Updates across the move: latest.json has `boards` (read by every launcher) and `boards_big` (read by 0.38+ on
+  the new layout). While images fit 3 MB both name the same files; for a bigger image `make_release.py
+  --bridge <latest.json of a <= 3 MB 0.38+ release>` puts that bridge in `boards` (and the top level), so a
+  pre-0.38 board goes old -> bridge -> move -> newest. Without --bridge make_release refuses such an image.
 
 ### 7.8 DevLink — remote development service
 
@@ -593,7 +605,7 @@ The P4 has no video decoder: its H.264 block only encodes. So the decoders are s
 (CODC), which picks the implementation: hardware where a chip has it (JPEG now; a later chip's H.264 decoder
 would slot in with no change to apps), else code built into the launcher, else a **codec module** from the SD
 card. Espressif's `esp_h264` decoder is Baseline only (tinyH264, ~9 fps at 640x480), useless for ordinary MP4s,
-so H.264 is FFmpeg's decoder: too big for the 3 MB launcher slot, hence a module.
+so H.264 is FFmpeg's decoder: too big for the 3 MB launcher slot of the time, hence a module.
 
 - **`blit_yuv` (DISP v5, `lx_comp_blit_yuv`)**: a decoder's planar YUV 4:2:0 frame (I420 / FFmpeg's yuv420p:
   three planes with strides) is repacked by the CPU into the P4's own YUV420 layout and turned into RGB565 and

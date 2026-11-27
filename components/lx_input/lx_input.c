@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "nvs.h"
 #include "esp_timer.h"
@@ -31,11 +32,30 @@ typedef struct {
     uint16_t last_vid, last_pid;    /* survive a disconnect: the pad gets its slot back */
     bool     has_map;
     uint8_t  map[LX_INPUT_MAP_BITS];    /* raw button bit -> PAPP_BTN_ bit, 0xFF = none */
+    uint8_t  kind;                  /* PAPP_PAD_* */
+    lx_padmap_ext_t ext;            /* gamepads.txt additions of its line */
+    uint32_t ext_gen;               /* +1 when the files were read again */
+    bool     has_joy;               /* the source sends the full view (lx_input_pad_joystick) */
+    papp_joystick_t joy;
+    bool     has_motion;
+    papp_motion_t motion;
+    /* a throttle that joined this player (handle = player + PAPP_MAX_PLAYERS) */
+    bool     joined;
+    papp_gamepad_t jst;
+    bool     jhas_joy;
+    papp_joystick_t jjoy;
+    /* outputs: rumble, lights (lx_padout task) */
+    lx_pad_out_fn out_fn;
+    void    *out_ctx;
+    uint16_t rum_strong, rum_weak;  /* asked for */
+    int64_t  rum_until;             /* 0 = until changed */
+    lx_pad_out_state_t sent;        /* last sent */
+    bool     out_fresh;             /* never sent: send the lights */
 } pad_t;
 
 static SemaphoreHandle_t s_lock;
 static lx_input_sys_cb_t s_sys_cb;
-static pad_t s_pads[PAPP_MAX_PLAYERS];
+static EXT_RAM_BSS_ATTR pad_t s_pads[PAPP_MAX_PLAYERS];      /* PSRAM: internal RAM is short at start-up */
 static bool s_kbd_attached;
 static uint8_t s_kbd_mods, s_kbd_keys[6];
 static uint8_t s_keymap[32];                /* bitmap of HID usages down */
@@ -46,6 +66,8 @@ static uint32_t s_q_head, s_q_tail;
 static bool s_board;                        /* board buttons merge into player 1 */
 static uint32_t s_board_buttons;
 static int s_paddle = -1;
+static SemaphoreHandle_t s_out_lock;        /* held while a source's output function runs */
+static TaskHandle_t s_out_task;
 
 #define LOCK()   xSemaphoreTake(s_lock, portMAX_DELAY)
 #define UNLOCK() xSemaphoreGive(s_lock)
@@ -130,6 +152,10 @@ bool lx_input_gamepad(int player, papp_gamepad_t *out)
     bool board = player == 0 && s_board;
     *out = p->st;
     out->buttons = p->effective;
+    if (p->joined && p->kind == PAPP_PAD_FLIGHTSTICK && !p->st.rt && !p->st.ry) {
+        out->ry = p->jst.ry;                /* the stick has no throttle of its own: the joined one's */
+        out->rt = p->jst.rt;
+    }
     out->connected = p->attached || p->injected || board;
     if (!p->attached && board) snprintf(out->name, sizeof(out->name), "Board pad");
     else if (!p->attached && p->injected) snprintf(out->name, sizeof(out->name), "DevLink");
@@ -170,6 +196,40 @@ static const char *map_load(const char *name, uint16_t vid, uint16_t pid, uint8_
 
 int lx_input_pad_attach(const char *name, uint16_t vid, uint16_t pid)
 {
+    return lx_input_pad_attach_kind(name, vid, pid, PAPP_PAD_GAMEPAD);
+}
+
+/* A throttle joins the first flight stick that has none: one player for both */
+static int join_throttle(const char *name, uint16_t vid, uint16_t pid)
+{
+    LOCK();
+    int player = -1;
+    for (int i = 0; i < PAPP_MAX_PLAYERS && player < 0; i++)
+        if (s_pads[i].attached && s_pads[i].kind == PAPP_PAD_FLIGHTSTICK && !s_pads[i].joined) player = i;
+    if (player >= 0) {
+        pad_t *p = &s_pads[player];
+        p->joined = true;
+        p->jst = (papp_gamepad_t){ .connected = 1, .vid = vid, .pid = pid };
+        snprintf(p->jst.name, sizeof(p->jst.name), "%s", name);
+        p->jhas_joy = false;
+    }
+    UNLOCK();
+    if (player >= 0) ESP_LOGI(TAG, "player %d: %s (%04X:%04X) joins as the throttle", player + 1, name, vid, pid);
+    return player < 0 ? -1 : player + PAPP_MAX_PLAYERS;
+}
+
+int lx_input_pad_attach_kind(const char *name, uint16_t vid, uint16_t pid, int kind)
+{
+    lx_padmap_ext_t ext;
+    if (lx_padmap_ext(vid, pid, &ext) && ext.kind >= 0 && ext.kind != kind) {
+        ESP_LOGI(TAG, "%s: %s by gamepads.txt", name, ext.kind == PAPP_PAD_FLIGHTSTICK ? "a flight stick" :
+                 ext.kind == PAPP_PAD_THROTTLE ? "a throttle" : ext.kind == PAPP_PAD_WHEEL ? "a wheel" : "a gamepad");
+        kind = ext.kind;
+    }
+    if (kind == PAPP_PAD_THROTTLE) {
+        int h = join_throttle(name, vid, pid);
+        if (h >= 0) return h;
+    }
     uint8_t map[LX_INPUT_MAP_BITS];
     const char *from = map_load(name, vid, pid, map);
     bool has_map = from != NULL;
@@ -192,6 +252,9 @@ int lx_input_pad_attach(const char *name, uint16_t vid, uint16_t pid)
         if (has_map) memcpy(p->map, map, sizeof(map));
         p->st = (papp_gamepad_t){ .connected = 1, .vid = vid, .pid = pid };
         snprintf(p->st.name, sizeof(p->st.name), "%s", name);
+        p->kind = (uint8_t)kind;
+        p->ext = ext;
+        p->has_joy = p->has_motion = p->joined = false;
         push_event(PAPP_EV_DEVICE_ADDED, player, 0, 0);
     }
     UNLOCK();
@@ -203,6 +266,14 @@ int lx_input_pad_attach(const char *name, uint16_t vid, uint16_t pid)
 void lx_input_pad_update(int player, uint32_t buttons, int16_t lx, int16_t ly, int16_t rx, int16_t ry,
                          uint16_t lt, uint16_t rt)
 {
+    if (player >= PAPP_MAX_PLAYERS && player < 2 * PAPP_MAX_PLAYERS) {     /* a joined throttle */
+        LOCK();
+        papp_gamepad_t *j = &s_pads[player - PAPP_MAX_PLAYERS].jst;
+        j->buttons = buttons;
+        j->lx = lx; j->ly = ly; j->rx = rx; j->ry = ry; j->lt = lt; j->rt = rt;
+        UNLOCK();
+        return;
+    }
     if (player < 0 || player >= PAPP_MAX_PLAYERS) return;
     LOCK();
     pad_t *p = &s_pads[player];
@@ -268,10 +339,15 @@ void lx_input_pad_reload_maps(void)
         if (!attached) continue;
         uint8_t map[LX_INPUT_MAP_BITS];
         bool has_map = lx_padmap_load(vid, pid, map) != LX_PADMAP_NONE;
+        lx_padmap_ext_t ext;
+        lx_padmap_ext(vid, pid, &ext);
         LOCK();
         if (p->attached && p->st.vid == vid && p->st.pid == pid) {
             p->has_map = has_map;
             if (has_map) memcpy(p->map, map, LX_INPUT_MAP_BITS);
+            ext.kind = p->ext.kind;         /* a new kind takes a reconnect */
+            p->ext = ext;
+            p->ext_gen++;
         }
         bool fire = pad_refresh(i);
         UNLOCK();
@@ -281,16 +357,260 @@ void lx_input_pad_reload_maps(void)
 
 void lx_input_pad_detach(int player)
 {
+    if (player >= PAPP_MAX_PLAYERS && player < 2 * PAPP_MAX_PLAYERS) {
+        LOCK();
+        pad_t *p = &s_pads[player - PAPP_MAX_PLAYERS];
+        p->joined = false;
+        memset(&p->jst, 0, sizeof(p->jst));
+        UNLOCK();
+        ESP_LOGI(TAG, "player %d: throttle disconnected", player - PAPP_MAX_PLAYERS + 1);
+        return;
+    }
     if (player < 0 || player >= PAPP_MAX_PLAYERS) return;
+    lx_input_pad_set_out(player, NULL, NULL);
     LOCK();
     pad_t *p = &s_pads[player];
     p->st.buttons = 0;
     pad_refresh(player);                    /* release whatever was held */
     p->attached = false;
     memset(&p->st, 0, sizeof(p->st));
+    p->has_joy = p->has_motion = p->joined = false;
     push_event(PAPP_EV_DEVICE_REMOVED, player, 0, 0);
     UNLOCK();
     ESP_LOGI(TAG, "player %d disconnected", player + 1);
+}
+
+/* ── Every control, motion, outputs (INPT v4) ───────────────────────────── */
+
+void lx_input_pad_set_kind(int player, int kind)
+{
+    if (player < 0 || player >= PAPP_MAX_PLAYERS) return;
+    LOCK();
+    s_pads[player].kind = (uint8_t)kind;
+    UNLOCK();
+}
+
+uint32_t lx_input_pad_ext_gen(int player)
+{
+    if (player < 0 || player >= PAPP_MAX_PLAYERS) return 0;
+    return s_pads[player].ext_gen;
+}
+
+int lx_input_pad_ext(int player, lx_padmap_ext_t *ext)
+{
+    memset(ext, 0, sizeof(*ext));
+    ext->kind = -1;
+    if (player >= PAPP_MAX_PLAYERS && player < 2 * PAPP_MAX_PLAYERS) return PAPP_PAD_THROTTLE;   /* joined */
+    if (player < 0 || player >= PAPP_MAX_PLAYERS) return -1;
+    LOCK();
+    int kind = s_pads[player].attached ? s_pads[player].kind : -1;
+    if (kind >= 0) *ext = s_pads[player].ext;
+    UNLOCK();
+    return kind;
+}
+
+bool lx_input_pad_picture(int player, char *name, size_t len)
+{
+    lx_padmap_ext_t ext;
+    int kind = lx_input_pad_ext(player, &ext);
+    if (kind < 0 || player < 0 || player >= PAPP_MAX_PLAYERS) return false;
+    LOCK();
+    uint16_t vid = s_pads[player].st.vid;
+    UNLOCK();
+    const char *pic = ext.pic[0] ? ext.pic
+                    : kind == PAPP_PAD_FLIGHTSTICK ? "flightstick"
+                    : kind == PAPP_PAD_THROTTLE ? "throttle"
+                    : kind == PAPP_PAD_WHEEL ? "wheel"
+                    : kind == PAPP_PAD_WIIMOTE ? "wiimote"
+                    : kind == PAPP_PAD_WIIMOTE_NUNCHUK ? "wiimote_nunchuk"
+                    : vid == 0x054C ? "playstation"                /* Sony */
+                    : vid == 0x057E ? "nintendo"                   /* Nintendo: Switch Pro, Wii U Pro, ... */
+                    : "gamepad";
+    snprintf(name, len, "%s", pic);
+    return true;
+}
+
+void lx_input_pad_joystick(int player, const papp_joystick_t *j)
+{
+    bool joined = player >= PAPP_MAX_PLAYERS && player < 2 * PAPP_MAX_PLAYERS;
+    if (joined) player -= PAPP_MAX_PLAYERS;
+    else if (player < 0 || player >= PAPP_MAX_PLAYERS) return;
+    LOCK();
+    pad_t *p = &s_pads[player];
+    if (joined) { p->jjoy = *j; p->jhas_joy = true; }
+    else { p->joy = *j; p->has_joy = true; }
+    UNLOCK();
+}
+
+void lx_input_pad_motion(int player, const papp_motion_t *m)
+{
+    if (player < 0 || player >= PAPP_MAX_PLAYERS) return;
+    LOCK();
+    s_pads[player].motion = *m;
+    s_pads[player].has_motion = true;
+    UNLOCK();
+}
+
+/* The standard view as a joystick, for sources that only send that */
+static void joy_from_std(const papp_gamepad_t *g, int kind, papp_joystick_t *j)
+{
+    lx_pad_state_t s = { g->buttons, g->lx, g->ly, g->rx, g->ry, g->lt, g->rt };
+    lx_pad_joystick_std(&s, kind, j);
+}
+
+bool lx_input_joystick(int player, papp_joystick_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->hat[0] = out->hat[1] = -1;
+    if (player < 0 || player >= PAPP_MAX_PLAYERS) return false;
+    LOCK();
+    pad_t *p = &s_pads[player];
+    bool board = player == 0 && s_board;
+    if (p->attached) {
+        if (p->has_joy) *out = p->joy;
+        else {
+            joy_from_std(&p->st, p->kind, out);
+            out->flags |= PAPP_JOY_STD_BUTTONS;
+        }
+        out->kind = p->kind;
+        out->vid = p->st.vid;
+        out->pid = p->st.pid;
+        snprintf(out->name, sizeof(out->name), "%s", p->st.name);
+        if (p->out_fn) out->flags |= PAPP_JOY_RUMBLE | PAPP_JOY_LIGHT;
+        if (p->has_motion) out->flags |= PAPP_JOY_MOTION;
+        if (p->joined) {                    /* the throttle's controls after the stick's */
+            papp_joystick_t t;
+            if (p->jhas_joy) t = p->jjoy;
+            else joy_from_std(&p->jst, PAPP_PAD_THROTTLE, &t);
+            for (int i = 0; i < t.naxes && out->naxes < PAPP_JOY_AXES; i++) {
+                out->role[out->naxes] = t.role[i];
+                out->axis[out->naxes++] = t.axis[i];
+            }
+            for (int i = 0; i < t.nhats && out->nhats < PAPP_JOY_HATS; i++) out->hat[out->nhats++] = t.hat[i];
+            int base = out->nbuttons;
+            for (int i = 0; i < t.nbuttons && base + i < 32; i++)
+                if (t.buttons & (1u << i)) out->buttons |= 1u << (base + i);
+            out->nbuttons = (uint8_t)(base + t.nbuttons > 32 ? 32 : base + t.nbuttons);
+            out->flags |= PAPP_JOY_JOINED;
+        }
+    } else if (p->injected || board) {
+        papp_gamepad_t g = { .buttons = p->effective };
+        joy_from_std(&g, PAPP_PAD_GAMEPAD, out);
+        out->flags |= PAPP_JOY_STD_BUTTONS;
+        snprintf(out->name, sizeof(out->name), "%s", board && !p->injected ? "Board pad" : "DevLink");
+    }
+    out->connected = p->attached || p->injected || board;
+    bool c = out->connected;
+    UNLOCK();
+    return c;
+}
+
+bool lx_input_motion(int player, papp_motion_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (player < 0 || player >= PAPP_MAX_PLAYERS) return false;
+    LOCK();
+    pad_t *p = &s_pads[player];
+    bool ok = p->attached && p->has_motion;
+    if (ok) *out = p->motion;
+    UNLOCK();
+    return ok;
+}
+
+/* Player colours, as PlayStation pads show them: blue, red, green, pink */
+static const uint8_t k_player_rgb[PAPP_MAX_PLAYERS][3] = {
+    { 0, 0, 64 }, { 64, 0, 0 }, { 0, 64, 0 }, { 64, 0, 32 },
+};
+
+#define OUT_BUZZ_MS 150
+
+static void out_kick(void)
+{
+    if (s_out_task) xTaskNotifyGive(s_out_task);
+}
+
+void lx_input_pad_set_out(int player, lx_pad_out_fn fn, void *ctx)
+{
+    if (player < 0 || player >= PAPP_MAX_PLAYERS || !s_out_lock) return;
+    xSemaphoreTake(s_out_lock, portMAX_DELAY);  /* a send in progress finishes first: ctx may go after this */
+    LOCK();
+    pad_t *p = &s_pads[player];
+    p->out_fn = fn;
+    p->out_ctx = ctx;
+    p->out_fresh = fn != NULL;
+    memset(&p->sent, 0, sizeof(p->sent));
+    if (fn) {                               /* a short buzz: this pad is player N */
+        p->rum_strong = p->rum_weak = 0x6000;
+        p->rum_until = esp_timer_get_time() + OUT_BUZZ_MS * 1000;
+    } else {
+        p->rum_strong = p->rum_weak = 0;
+    }
+    UNLOCK();
+    xSemaphoreGive(s_out_lock);
+    out_kick();
+}
+
+bool lx_input_rumble(int player, uint16_t strong, uint16_t weak, uint32_t ms)
+{
+    if (player < 0 || player >= PAPP_MAX_PLAYERS) return false;
+    LOCK();
+    pad_t *p = &s_pads[player];
+    bool ok = p->attached && p->out_fn;
+    if (ok) {
+        p->rum_strong = strong;
+        p->rum_weak = weak;
+        p->rum_until = ms && (strong || weak) ? esp_timer_get_time() + (int64_t)ms * 1000 : 0;
+    }
+    UNLOCK();
+    if (ok) out_kick();
+    return ok;
+}
+
+void lx_input_rumble_stop(void)
+{
+    LOCK();
+    for (int i = 0; i < PAPP_MAX_PLAYERS; i++) s_pads[i].rum_strong = s_pads[i].rum_weak = 0;
+    UNLOCK();
+    out_kick();
+}
+
+/* Sends what changed to each pad's source; ends rumbles whose time is up */
+static void out_task(void *arg)
+{
+    for (;;) {
+        int64_t now = esp_timer_get_time(), next = 0;
+        xSemaphoreTake(s_out_lock, portMAX_DELAY);
+        for (int i = 0; i < PAPP_MAX_PLAYERS; i++) {
+            LOCK();
+            pad_t *p = &s_pads[i];
+            if (p->rum_until && now >= p->rum_until) {
+                p->rum_strong = p->rum_weak = 0;
+                p->rum_until = 0;
+            }
+            if (p->rum_until && (!next || p->rum_until < next)) next = p->rum_until;
+            lx_pad_out_state_t want = {
+                .strong = p->rum_strong, .weak = p->rum_weak, .player = (uint8_t)i,
+                .r = k_player_rgb[i][0], .g = k_player_rgb[i][1], .b = k_player_rgb[i][2],
+            };
+            lx_pad_out_fn fn = p->out_fn;
+            void *ctx = p->out_ctx;
+            bool send = fn && (p->out_fresh || memcmp(&want, &p->sent, sizeof(want)) != 0);
+            if (send) {
+                p->sent = want;
+                p->out_fresh = false;
+            }
+            UNLOCK();
+            if (send) fn(ctx, &want);       /* may block on the transport: not under the input lock */
+        }
+        xSemaphoreGive(s_out_lock);
+        TickType_t wait = portMAX_DELAY;
+        if (next) {
+            int64_t ms = (next - esp_timer_get_time()) / 1000 + 1;
+            wait = pdMS_TO_TICKS(ms < 1 ? 1 : ms > 60000 ? 60000 : ms);
+            if (!wait) wait = 1;
+        }
+        ulTaskNotifyTake(pdTRUE, wait);
+    }
 }
 
 /* ── Keyboard ───────────────────────────────────────────────────────────── */
@@ -529,7 +849,9 @@ esp_err_t lx_input_init(lx_input_sys_cb_t sys_cb)
 {
     if (s_lock) return ESP_OK;
     s_lock = xSemaphoreCreateMutex();
+    s_out_lock = xSemaphoreCreateMutex();
     s_sys_cb = sys_cb;
+    xTaskCreatePinnedToCore(out_task, "lx_padout", 3072, NULL, 5, &s_out_task, 0);
     for (int i = 0; i < PAPP_MAX_PLAYERS; i++) {
         esp_timer_create_args_t a = { .callback = pad_release_cb, .arg = (void *)(intptr_t)i, .name = "inj_pad" };
         esp_timer_create(&a, &s_pads[i].release);

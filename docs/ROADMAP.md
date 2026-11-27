@@ -16,8 +16,8 @@ Last reviewed: 2026-11-26 (launcher 0.37.1).
 
 My short list, in order. Change it freely.
 
-1. **Bigger app slots** (Platform): flash is getting tight. The Tab5 image has 257 KB (8%) left in its 3 MB slot,
-   so the next big feature may not fit. The longer this waits, the more boards there are to migrate.
+1. **Bigger app slots** (Platform): done in 0.38 (two 6.5 MB slots; the launcher moves an old board itself,
+   tested on the 7" v1.x, 7" v3.2 and Tab5). Release images stay under 3 MB until most boards have moved.
 2. **Community PR queue** (Review queue): 17 PRs are open. Most are community apps, which reach the Store
    without a launcher release once merged.
 3. **MP4 demuxer for apps** (Media): CODC decodes packets, but every player has to parse MP4 itself. A shared

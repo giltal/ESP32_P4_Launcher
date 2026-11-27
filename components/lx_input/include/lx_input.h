@@ -38,12 +38,35 @@ void     lx_input_flush(void);
 void     lx_input_describe(char *buf, size_t len);
 /* PAPP_ANALOG_*: 0..65535, -1 if the board has no such input. */
 int      lx_input_analog(int ch);
+/* INPT v4 */
+bool     lx_input_joystick(int player, papp_joystick_t *out);
+bool     lx_input_motion(int player, papp_motion_t *out);
+bool     lx_input_rumble(int player, uint16_t strong, uint16_t weak, uint32_t ms);  /* false: no motors */
+void     lx_input_rumble_stop(void);                /* every motor off (app teardown) */
 
 /* Sources: gamepads */
 int  lx_input_pad_attach(const char *name, uint16_t vid, uint16_t pid);   /* -> player or -1 */
 void lx_input_pad_update(int player, uint32_t buttons, int16_t lx, int16_t ly, int16_t rx, int16_t ry,
                          uint16_t lt, uint16_t rt);
 void lx_input_pad_detach(int player);
+/* kind = PAPP_PAD_*. A throttle joins the player of a flight stick that has none: the handle is then
+ * player + PAPP_MAX_PLAYERS, used like a player with update / joystick / detach */
+int  lx_input_pad_attach_kind(const char *name, uint16_t vid, uint16_t pid, int kind);
+void lx_input_pad_set_kind(int player, int kind);    /* it changed (a Wii Remote got a Nunchuk) */
+/* INPT v4 views, after lx_input_pad_update: every control (sources that know more than the standard
+ * pad), motion sensors */
+void lx_input_pad_joystick(int player, const papp_joystick_t *j);
+void lx_input_pad_motion(int player, const papp_motion_t *m);
+/* Outputs: the source's function sends rumble and lights to the pad. Runs on the "lx_padout" task (internal
+ * stack), only for changes, may block on the transport. Set it after attach; NULL before freeing ctx (waits
+ * for a send in progress). Setting one gives a short buzz and the player's colour */
+typedef struct {
+    uint16_t strong, weak;      /* motors 0..65535: heavy (left), light (right) */
+    uint8_t  r, g, b;           /* light bar: the player's colour */
+    uint8_t  player;            /* 0..3: player LEDs */
+} lx_pad_out_state_t;
+typedef void (*lx_pad_out_fn)(void *ctx, const lx_pad_out_state_t *s);
+void lx_input_pad_set_out(int player, lx_pad_out_fn fn, void *ctx);
 
 /* Sources: HID gamepads of other transports (Bluetooth, lx_input_hidpad.c). open attaches a
  * player (NULL: no free slot); desc = the HID report descriptor (parsed here, may be freed after);
@@ -52,6 +75,11 @@ typedef struct lx_hidpad lx_hidpad_t;
 lx_hidpad_t *lx_input_hidpad_open(const char *name, uint16_t vid, uint16_t pid, const uint8_t *desc, size_t len);
 void         lx_input_hidpad_report(lx_hidpad_t *pad, const uint8_t *report, size_t len);
 void         lx_input_hidpad_close(lx_hidpad_t *pad);
+/* How to send output reports (rumble, lights) to the pad: data = the report, id first. Called on the
+ * lx_padout task. NULL: none any more (call it before the transport's context goes) */
+typedef void (*lx_hidpad_send_fn)(void *ctx, const uint8_t *data, size_t len);
+void         lx_input_hidpad_set_sender(lx_hidpad_t *pad, lx_hidpad_send_fn fn, void *ctx);
+void        *lx_input_hidpad_sender_ctx(lx_hidpad_t *pad);   /* to free it after close */
 /* Report timing since the last call (then reset): a stall is a gap of LX_HIDPAD_STALL_US or more */
 #define LX_HIDPAD_STALL_US 100000
 typedef struct {
@@ -73,6 +101,9 @@ uint32_t     lx_input_hidpad_still_ms(lx_hidpad_t *pad);   /* since the last inp
  * call it from a task with an internal stack, never from an app thread. */
 #define LX_INPUT_MAP_BITS 20
 int       lx_input_pad_first(void);                 /* first real pad, or -1 */
+/* Its picture's name in /sd/config/pads (<name>.png + <name>.txt, tools/make_pad_pictures.py): gamepads.txt's
+ * pic=, else by kind and maker ("gamepad" for any other). false = no pad there */
+bool      lx_input_pad_picture(int player, char *name, size_t len);
 uint32_t  lx_input_pad_raw(int player);             /* buttons before the mapping */
 esp_err_t lx_input_pad_set_map(int player, const uint8_t *map);   /* NULL: remove yours (database or default) */
 void      lx_input_pad_reload_maps(void);           /* the files changed: apply them to the connected pads */

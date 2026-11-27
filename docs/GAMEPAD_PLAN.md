@@ -112,6 +112,32 @@ Boards: 7" v1 (COM10), 7" v3 (COM6, a DualShock 4 is connected over Bluetooth), 
 Phases 1-2 can be built and checked with test descriptors and DevLink alone; phase 3 and the real-device checks of
 phase 1 need the devices plugged in or paired.
 
+## Status (2026-11-27, overnight, uncommitted on claude/gamepads-v2)
+
+Done and checked without the devices:
+- Phase 1: parser by axis role (Desktop + Simulation pages, 2 hats, 32 buttons, 4 report ids), kind detection,
+  flight-stick / wheel views, throttle joins the flight stick's player. `hid_test` (test descriptors, Wii scripts):
+  0 failures on COM10.
+- Phase 2: INPT v4 (`papp_input_joystick` / `_motion` / `_rumble`; the SDK falls back to `gamepad` on older
+  launchers), DevLink `input state --all`, `input rumble`. Controller test app (Store, Tools; icon).
+- Phase 2b: rumble + lights for DualShock 4 / DualSense (USB and Bluetooth reports with CRC), Switch Pro HD rumble,
+  XInput, Wii Remote; 150 ms buzz on connect, player colours; stopped at app exit. On COM6 the DS4 over USB:
+  motion reads 1 g, `input rumble` accepted, no output errors. **Not felt or seen yet.**
+- Phase 3: Wii Remote, Nunchuk, Classic Controller, Wii U Pro: PIN pairing (SYNC and 1+2), extension set-up,
+  sideways / upright layouts, rumble bit, accelerometer. Scripted only.
+- Phase 4: `tools/make_pad_pictures.py` draws 9 families into `SDcard/config/pads` (.png + positions); Map
+  controller shows the pad's picture and rings the asked button (checked on COM6 with the DS4: PlayStation
+  picture). The Store keeps `/sd/config/pads` current ("pads" in apps.json; checked with a local catalogue).
+
+Also done: launcher 0.38.0 moves boards to 6.5 MB app slots (ARCHITECTURE, "Flash layout" under self-update), tested on all three.
+
+To test with the devices: real flight stick, throttle (and both together), wheel (axes, pedals, kind detection);
+rumble and light bar felt/seen on DS4 (USB, Bluetooth), DualSense, Switch Pro, Xbox pad; Wii Remote pairing both
+ways, Nunchuk, Classic Controller, motion. Then `gamepads.txt` lines (`kind=`, `pic=`, axis remaps) for them.
+
+Not done: Bluetooth LE pads' output reports (Xbox BLE rumble), DS3 rumble; pictures in Settings / Bluetooth
+screens; a picture in Controller test (apps have no PNG decoder).
+
 ## Open questions
 
 - Which devices are at hand to test with (flight stick / HOTAS model, wheel, Wii Remote original or -TR, Nunchuk,

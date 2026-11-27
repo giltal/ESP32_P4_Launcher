@@ -396,7 +396,7 @@ typedef struct {
 /* ── INPT interface ─────────────────────────────────────────────────────── */
 
 #define PAPP_IF_INPT      PAPP_FOURCC('I', 'N', 'P', 'T')
-#define PAPP_IF_INPT_VER  3      /* v2: analog, v3: keyboard */
+#define PAPP_IF_INPT_VER  4      /* v2: analog, v3: keyboard, v4: joystick, motion, rumble */
 
 #define PAPP_MAX_PLAYERS  4
 
@@ -465,6 +465,71 @@ typedef struct {
     uint32_t time_ms;
 } papp_input_event_t;
 
+/* INPT v4: every control of a pad, flight stick, throttle or wheel (joystick()), motion sensors (motion()),
+ * vibration (rumble()). papp_gamepad_t stays the simple view: a flight stick there has X/Y = left stick,
+ * twist = right stick X, throttle = right stick Y and RT, trigger = A, thumb button = B, hat = d-pad;
+ * a wheel has steering = left stick X, accelerator = RT, brake = LT. */
+enum {
+    PAPP_PAD_GAMEPAD = 0,
+    PAPP_PAD_FLIGHTSTICK,
+    PAPP_PAD_THROTTLE,           /* a throttle on its own (it joins a flight stick's player when both are there) */
+    PAPP_PAD_WHEEL,
+    PAPP_PAD_WIIMOTE,            /* Wii Remote alone (held sideways) */
+    PAPP_PAD_WIIMOTE_NUNCHUK,
+    PAPP_PAD_ARCADE,
+    PAPP_PAD_OTHER,
+};
+
+enum {                           /* role of a joystick axis */
+    PAPP_AXIS_X = 0, PAPP_AXIS_Y, PAPP_AXIS_Z, PAPP_AXIS_RX, PAPP_AXIS_RY, PAPP_AXIS_RZ,
+    PAPP_AXIS_SLIDER, PAPP_AXIS_DIAL, PAPP_AXIS_WHEEL,
+    PAPP_AXIS_THROTTLE, PAPP_AXIS_RUDDER, PAPP_AXIS_STEERING, PAPP_AXIS_ACCEL, PAPP_AXIS_BRAKE,
+    PAPP_AXIS_SLIDER2,
+    PAPP_AXIS_LT, PAPP_AXIS_RT,  /* analog triggers of pads read by model (DualShock, Xbox) */
+    PAPP_AXIS_COUNT,
+};
+
+#define PAPP_JOY_AXES     8
+#define PAPP_JOY_HATS     2
+
+#define PAPP_JOY_RUMBLE   (1u << 0)  /* rumble() works on it */
+#define PAPP_JOY_MOTION   (1u << 1)  /* motion() has data */
+#define PAPP_JOY_LIGHT    (1u << 2)  /* a light bar or player LEDs the launcher sets */
+#define PAPP_JOY_JOINED   (1u << 3)  /* a second device (a throttle) is merged into this player */
+#define PAPP_JOY_STD_BUTTONS (1u << 4) /* buttons are the PAPP_BTN_* bits (a pad read by model), not numbers */
+
+typedef struct {
+    uint8_t  connected;
+    uint8_t  kind;               /* PAPP_PAD_* */
+    uint8_t  naxes;              /* used entries of axis[] */
+    uint8_t  nbuttons;           /* highest button number present (0..32) */
+    uint8_t  nhats;
+    uint8_t  reserved;
+    uint16_t flags;              /* PAPP_JOY_* */
+    uint16_t vid, pid;
+    uint8_t  role[PAPP_JOY_AXES];   /* PAPP_AXIS_* of axis[i] */
+    int16_t  axis[PAPP_JOY_AXES];   /* -32768..32767 over the axis' whole travel; +y = down; a throttle
+                                       or pedal reads -32768 at one end, 32767 at the other */
+    int8_t   hat[PAPP_JOY_HATS];    /* 0..7 clockwise from up, -1 centred */
+    uint16_t reserved2;
+    uint32_t buttons;            /* bit n = the device's button n + 1. Pads read by model (DualShock, Xbox,
+                                    Switch, Wii) number theirs as the PAPP_BTN_* bits */
+    char     name[24];
+} papp_joystick_t;
+
+#define PAPP_MOTION_ACCEL (1u << 0)
+#define PAPP_MOTION_GYRO  (1u << 1)
+#define PAPP_MOTION_IR    (1u << 2)
+
+typedef struct {
+    uint8_t  valid;              /* PAPP_MOTION_* */
+    uint8_t  reserved[3];
+    int16_t  accel[3];           /* x right, y down... as the pad sends it; 4096 per g */
+    int16_t  gyro[3];            /* pitch, yaw, roll: 16 per degree/s (as the pad sends it, uncalibrated) */
+    uint16_t ir_x, ir_y;         /* Wii Remote pointer, 0..1023 x 0..767; 0xFFFF = not seen */
+    uint32_t time_ms;            /* when the data arrived */
+} papp_motion_t;
+
 typedef struct {
     papp_iface_hdr_t hdr;
     bool     (*gamepad)(int player, papp_gamepad_t *out);   /* false if not connected */
@@ -476,6 +541,12 @@ typedef struct {
     int      (*analog)(int ch);                           /* PAPP_ANALOG_*: 0..65535, -1 absent */
     /* v3 */
     bool     (*keyboard)(void);                           /* a keyboard is attached (USB or the board's own) */
+    /* v4 */
+    bool     (*joystick)(int player, papp_joystick_t *out);  /* false if not connected */
+    bool     (*motion)(int player, papp_motion_t *out);      /* false if the pad has no motion sensors */
+    /* strong = the heavy (left) motor, weak = the light (right) one, 0..65535; stops by itself after ms
+     * (0 = until the next call), and when the app ends. False if the pad has no motors */
+    bool     (*rumble)(int player, uint16_t strong, uint16_t weak, uint32_t ms);
 } papp_if_inpt_t;
 
 /* ── THRD interface ─────────────────────────────────────────────────────── */

@@ -51,3 +51,11 @@ void lx_update_online_reset(void);          /* result read: back to IDLE */
 int lx_update_online_percent(void);
 const char *lx_update_online_version(void);
 const char *lx_update_online_error(void);
+
+/* Flash layout (lx_layout.c). Launchers before 0.38 had a 3 MB factory slot + two 3 MB update slots; the
+ * table now has two 6.5 MB slots. lx_update_layout_old() = this board still has the old table;
+ * lx_update_layout_migrate() rewrites it (once, after lx_update_confirm(), on a task with an internal stack;
+ * progress 0..100), then the caller restarts. An error before the table write leaves the old layout working. */
+bool lx_update_layout_old(void);
+esp_err_t lx_update_layout_migrate(void (*progress)(int percent));
+const char *lx_update_layout_name(void);    /* "6.5 MB slots", "3 MB slots (old)", "other" */

@@ -1,0 +1,13 @@
+# flightstick: Flight stick: trigger, thumb button, hat, base buttons (tools/make_pad_pictures.py; x,y,r or x,y,rx,ry in the 400x220 picture)
+UP=200,37,9
+DOWN=200,55,9
+LEFT=191,46,9
+RIGHT=209,46,9
+A=166,78,12
+B=228,30,11
+X=128,180,12
+Y=156,194,12
+L1=244,194,12
+R1=272,180,12
+SELECT=112,160,12,8
+START=288,160,12,8

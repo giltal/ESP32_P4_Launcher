@@ -1,0 +1,15 @@
+# wiimote_nunchuk: Wii Remote upright with a Nunchuk (tools/make_pad_pictures.py; x,y,r or x,y,rx,ry in the 400x220 picture)
+UP=265,32,11
+DOWN=265,56,11
+LEFT=253,44,11
+RIGHT=277,44,11
+A=265,84,15
+SELECT=245,118,10
+HOME=265,118,10
+START=285,118,10
+X=265,162,12
+Y=265,188,12
+B=310,84,12
+L3=130,84,22
+L1=111,33,23,11
+L2=149,31,23,13

@@ -29,6 +29,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_bt_main.h"
+#include "esp_bt_device.h"
 #include "esp_gap_bt_api.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gattc_api.h"
@@ -200,6 +201,8 @@ static const char *model_name(uint16_t vid, uint16_t pid)
     if (vid == 0x054C && (pid == 0x05C4 || pid == 0x09CC)) return "DualShock 4";
     if (vid == 0x054C && (pid == 0x0CE6 || pid == 0x0DF2)) return "DualSense";
     if (vid == 0x057E && pid == 0x2009) return "Switch Pro Controller";
+    if (vid == 0x057E && pid == 0x0306) return "Wii Remote";
+    if (vid == 0x057E && pid == 0x0330) return "Wii Remote Plus";
     if (vid == 0x045E) return "Xbox Wireless Controller";
     return NULL;
 }
@@ -238,6 +241,13 @@ typedef struct {
     uint8_t  desc[];
 } attach_t;
 
+/* Output reports (rumble, lights) on the interrupt channel; ctx = the pad's address (a copy, freed at detach) */
+static void classic_send(void *ctx, const uint8_t *data, size_t len)
+{
+    esp_err_t e = esp_bt_hid_host_send_data((uint8_t *)ctx, (uint8_t *)data, len);
+    if (e != ESP_OK) ESP_LOGD(TAG, "send: %s", esp_err_to_name(e));
+}
+
 static void attach_job(void *arg)
 {
     attach_t *a = arg;
@@ -251,9 +261,17 @@ static void attach_job(void *arg)
         else snprintf(name, sizeof(name), "Bluetooth pad %04X:%04X", a->vid, a->pid);
         if (k >= 0 && !s_saved[k].name[0]) save_pad(c->addr, name, s_saved[k].ble, s_saved[k].atype);
         lx_hidpad_t *p = lx_input_hidpad_open(name, a->vid, a->pid, a->desc, a->len);
+        uint8_t *addr = p && !c->ble ? malloc(6) : NULL;
+        if (addr) {
+            memcpy(addr, c->addr, 6);
+            lx_input_hidpad_set_sender(p, classic_send, addr);
+        }
         xSemaphoreTake(s_lock, portMAX_DELAY);
         if (c->used && c->gen == a->gen) c->pad = p;
-        else lx_input_hidpad_close(p);          /* it went away meanwhile */
+        else {                                  /* it went away meanwhile */
+            lx_input_hidpad_close(p);
+            free(addr);
+        }
         xSemaphoreGive(s_lock);
     }
     free(a);
@@ -261,7 +279,9 @@ static void attach_job(void *arg)
 
 static void detach_job(void *arg)
 {
+    void *ctx = lx_input_hidpad_sender_ctx(arg);
     lx_input_hidpad_close((lx_hidpad_t *)arg);
+    free(ctx);
 }
 
 static void post_attach(conn_t *c, uint16_t vid, uint16_t pid, const uint8_t *desc, size_t len)
@@ -887,7 +907,9 @@ void lx_bt_pads_stack_down(void)
         xSemaphoreGive(s_lock);
         free(s_conn[i].map);
         s_conn[i].map = NULL;
+        void *ctx = lx_input_hidpad_sender_ctx(p);
         lx_input_hidpad_close(p);
+        free(ctx);
     }
     if (s_hh_up) esp_bt_hid_host_deinit();
     s_hh_up = false;
@@ -1007,6 +1029,30 @@ bool lx_bt_pads_pair_saved(const uint8_t addr[6])
 
 bool lx_bt_pads_pairing(void) { return s_pairing; }
 
+/* Wii Remotes pair with a legacy PIN of 6 raw bytes: the board's address reversed when the red SYNC
+ * button was pressed (paired for good: any button reconnects it later), the remote's own address reversed
+ * for 1+2 (this session only). We can't tell which, so the attempts alternate, SYNC first. */
+static bool is_wii_name(const char *n)
+{
+    return n && (strstr(n, "RVL-CNT") || strstr(n, "Wii"));
+}
+
+bool lx_bt_pads_pin(const uint8_t *bda, uint8_t *pin, uint8_t *len)
+{
+    static uint8_t tries;
+    const char *name = NULL;
+    if (s_pairing && !memcmp(s_pair.addr, bda, 6)) name = s_pair.name;
+    int k = saved_find(bda);
+    if (!name && k >= 0) name = s_saved[k].name;
+    if (!is_wii_name(name)) return false;
+    const uint8_t *host = esp_bt_dev_get_address();
+    const uint8_t *src = (tries++ & 1) || !host ? bda : host;
+    for (int i = 0; i < 6; i++) pin[i] = src[5 - i];
+    *len = 6;
+    ESP_LOGI(TAG, "%s: Wii Remote PIN (%s address)", addr_str(bda), src == bda ? "its" : "our");
+    return true;
+}
+
 static void forget_job(void *a)
 {
     (void)a;
@@ -1054,6 +1100,7 @@ void lx_bt_pads_dongle(bool present) { (void)present; }
 void lx_bt_pads_app(bool active) { (void)active; }
 void lx_bt_pads_cancel_open(void) {}
 bool lx_bt_pads_owns(const uint8_t *bda) { (void)bda; return false; }
+bool lx_bt_pads_pin(const uint8_t *bda, uint8_t *pin, uint8_t *len) { (void)bda; (void)pin; (void)len; return false; }
 bool lx_bt_pads_stats(const uint8_t *addr, lx_hidpad_stats_t *out) { (void)addr; (void)out; return false; }
 uint32_t lx_bt_pads_still_ms(void) { return UINT32_MAX; }
 int         lx_bt_pads_list(lx_bt_pad_t *out, int max) { (void)out; (void)max; return 0; }

@@ -1,0 +1,18 @@
+# playstation: PlayStation-style pad: d-pad above the left stick, symbols (tools/make_pad_pictures.py; x,y,r or x,y,rx,ry in the 400x220 picture)
+L2=100,25,26,13
+R2=300,25,26,13
+L1=102,47,36,11
+R1=298,47,36,11
+UP=104,89,10
+DOWN=104,111,10
+LEFT=93,100,10
+RIGHT=115,100,10
+A=296,119,13
+B=315,100,13
+X=277,100,13
+Y=296,81,13
+L3=154,150,21
+R3=246,150,21
+SELECT=146,72,9,12
+START=254,72,9,12
+HOME=200,128,11
