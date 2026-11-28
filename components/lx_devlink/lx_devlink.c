@@ -572,6 +572,12 @@ static void h_input(uint16_t seq, const uint8_t *p, uint32_t len)
         uint16_t strong = (uint16_t)(p[2] | p[3] << 8), weak = (uint16_t)(p[4] | p[5] << 8);
         uint32_t ms = (uint32_t)p[6] | (uint32_t)p[7] << 8 | (uint32_t)p[8] << 16 | (uint32_t)p[9] << 24;
         reply_str(DL_INPUT, seq, lx_input_rumble(p[1], strong, weak, ms) ? "ok" : "no motors");
+    } else if (len >= 7 && p[0] == DL_INPUT_WHEEL) {
+        int32_t v = (int32_t)((uint32_t)p[3] | (uint32_t)p[4] << 8 | (uint32_t)p[5] << 16 | (uint32_t)p[6] << 24);
+        bool ok = p[2] == 0 ? lx_input_wheel_range(p[1], (uint16_t)v)
+                : p[2] == 1 ? lx_input_force(p[1], (int16_t)(v < -32768 ? -32768 : v > 32767 ? 32767 : v))
+                : lx_input_spring(p[1], v);
+        reply_str(DL_INPUT, seq, ok ? "ok" : "no force feedback");
     } else if (len >= 1 && p[0] == DL_INPUT_STATE) {
         jbuf_t j = { .buf = s_tx, .cap = DL_MAX_PAYLOAD };
         char desc[128];

@@ -52,7 +52,7 @@ RUN, STOP, STATUS = 0x30, 0x31, 0x32
 REBOOT, CRASH, CRASH_CLEAR, BOOTLOG = 0x40, 0x41, 0x42, 0x43
 NET, DISPLAY, BT = 0x52, 0x53, 0x54
 SHOT, INPUT = 0x50, 0x51
-INPUT_PAD, INPUT_KEY, INPUT_STATE, INPUT_UNMAP, INPUT_RUMBLE = 1, 2, 3, 4, 5
+INPUT_PAD, INPUT_KEY, INPUT_STATE, INPUT_UNMAP, INPUT_RUMBLE, INPUT_WHEEL = 1, 2, 3, 4, 5, 6
 PAD_KINDS = ["gamepad", "flight stick", "throttle", "wheel", "Wii Remote", "Wii Remote + Nunchuk", "arcade", "other"]
 AXIS_ROLES = ["X", "Y", "Z", "Rx", "Ry", "Rz", "Slider", "Dial", "Wheel", "Throttle", "Rudder", "Steering",
               "Accel", "Brake", "Slider2", "LT", "RT"]
@@ -553,7 +553,7 @@ def main():
     p = sub.add_parser("shot"); p.add_argument("out", nargs="?", default="screenshot.png")
     p = sub.add_parser("log"); p.add_argument("--seconds", type=float, default=0)
     p = sub.add_parser("input", help="inject input or read the input state")
-    p.add_argument("what", choices=["state", "pad", "key", "text", "unmap", "rumble"])
+    p.add_argument("what", choices=["state", "pad", "key", "text", "unmap", "rumble", "range", "force", "spring"])
     p.add_argument("value", nargs="?", help="pad: A+START ...; key: ENTER, a, 0x28; text: string")
     p.add_argument("--player", type=int, default=0)
     p.add_argument("--hold", type=int, default=100, help="ms")
@@ -666,6 +666,10 @@ def main():
                 parts = [int(x, 0) for x in (args.value or "40000,40000,500").split(",")]
                 strong, weak, ms = (parts + [40000, 40000, 500][len(parts):])[:3]
                 r = dl.request(INPUT, bytes([INPUT_RUMBLE, args.player]) + struct.pack("<HHI", strong, weak, ms))
+                print(f"player {args.player + 1}: {r.decode()}")
+            elif args.what in ("range", "force", "spring"):  # force-feedback wheel: degrees / -32768..32767 / 0..65535
+                what = ("range", "force", "spring").index(args.what)
+                r = dl.request(INPUT, bytes([INPUT_WHEEL, args.player, what]) + struct.pack("<i", int(args.value or 0, 0)))
                 print(f"player {args.player + 1}: {r.decode()}")
             elif args.what == "unmap":                  # forget the pad's saved button mapping
                 dl.request(INPUT, bytes([INPUT_UNMAP, args.player]))

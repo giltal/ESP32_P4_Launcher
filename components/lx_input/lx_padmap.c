@@ -13,6 +13,9 @@
  *                    BRAKE SLIDER2) to a stick or trigger of the standard pad (LX LY RX RY LT RT; "-RY" =
  *                    inverted, "-" = none). For devices read by their HID descriptor
  *   pic=<name>       the picture in /sd/config/pads (else the kind's)
+ *   range=<degrees>  a force-feedback wheel's rotation, 40..900 (Settings -> Map controller; default 900)
+ *   spring=<percent> its force strength, 0..100 (default 25): the centring spring outside apps, and the gain on
+ *                    the forces apps ask for (25 = as asked, 50 = 1.5x, 75 = 2x, 0 = no force feedback)
  * for example
  *   044F:B10A  kind=flightstick SLIDER=-RY RZ=RX pic=flightstick  # a flight stick
  *
@@ -74,7 +77,8 @@ static bool is_key(const char *s, size_t n, const char *key)
 /* A key of the 0.38 additions (kind, pic, an axis)? */
 static bool ext_key(const char *s, size_t n)
 {
-    return is_key(s, n, "kind") || is_key(s, n, "pic") || name_in(k_axes, HID_AX_COUNT, s, n) >= 0;
+    return is_key(s, n, "kind") || is_key(s, n, "pic") || is_key(s, n, "range") || is_key(s, n, "spring") ||
+           name_in(k_axes, HID_AX_COUNT, s, n) >= 0;
 }
 
 /* One token key=value of the additions into *e */
@@ -86,6 +90,10 @@ static void ext_token(lx_padmap_ext_t *e, const char *k, size_t kn, const char *
         if (kind >= 0) e->kind = (int8_t)kind;
     } else if (is_key(k, kn, "pic")) {
         snprintf(e->pic, sizeof(e->pic), "%.*s", (int)vn, v);
+    } else if (is_key(k, kn, "range") || is_key(k, kn, "spring")) {
+        int n = atoi(v);
+        if (is_key(k, kn, "range")) e->range = (uint16_t)(n < 40 ? 40 : n > 900 ? 900 : n);
+        else { e->has_spring = true; e->spring = (uint8_t)(n < 0 ? 0 : n > 100 ? 100 : n); }
     } else if ((ax = name_in(k_axes, HID_AX_COUNT, k, kn)) >= 0 && e->naxis < LX_PADMAP_AXES) {
         bool inv = vn > 1 && *v == '-';
         int to = vn == 1 && *v == '-' ? 0xFF : name_in(k_sticks, 6, v + inv, vn - inv);
@@ -188,7 +196,33 @@ int lx_padmap_load(uint16_t vid, uint16_t pid, uint8_t *map)
     return LX_PADMAP_NONE;
 }
 
-esp_err_t lx_padmap_save(uint16_t vid, uint16_t pid, const char *name, const uint8_t *map)
+/* The database's line for vid:pid: its additions as text (when your own line doesn't exist yet) */
+static void db_ext_text(uint16_t vid, uint16_t pid, char *out, size_t cap)
+{
+    out[0] = 0;
+    FILE *f = fopen(DB_FILE, "r");
+    if (!f) return;
+    char line[LINE_MAX_];
+    uint8_t scratch[LX_INPUT_MAP_BITS];
+    while (fgets(line, sizeof(line), f))
+        if (parse_line(line, vid, pid, scratch)) { ext_text(line, out, cap); break; }
+    fclose(f);
+}
+
+/* Drops the range= / spring= tokens of additions text */
+static void strip_wheel(char *extra)
+{
+    char out[128];
+    size_t n = 0;
+    out[0] = 0;
+    for (char *t = strtok(extra, " "); t; t = strtok(NULL, " "))
+        if (strncasecmp(t, "range=", 6) && strncasecmp(t, "spring=", 7) && n + strlen(t) + 2 < sizeof(out))
+            n += snprintf(out + n, sizeof(out) - n, " %s", t);
+    strcpy(extra, out);
+}
+
+/* wheel: " range=.. spring=.." to set, NULL = keep what the line has */
+static esp_err_t save_line(uint16_t vid, uint16_t pid, const char *name, const uint8_t *map, const char *wheel)
 {
     char *old = heap_caps_calloc(1, FILE_MAX, MALLOC_CAP_SPIRAM);
     if (!old) return ESP_ERR_NO_MEM;
@@ -208,12 +242,19 @@ esp_err_t lx_padmap_save(uint16_t vid, uint16_t pid, const char *name, const uin
                   "# SDcard/config/gamepads.txt in https://github.com/giltal/ESP32_P4_Launcher\n", f);
     uint8_t scratch[LX_INPUT_MAP_BITS];
     char extra[128] = "";
+    bool mine = false;
     for (char *line = old; line < old + n;) {                /* keep every other pad's line */
         char *next = strchr(line, '\n');
         next = next ? next + 1 : old + n;
         if (!parse_line(line, vid, pid, scratch)) fwrite(line, 1, next - line, f);
-        else ext_text(line, extra, sizeof(extra));          /* this pad's kind, axes, picture stay */
+        else { ext_text(line, extra, sizeof(extra)); mine = true; }   /* this pad's kind, axes, picture stay */
         line = next;
+    }
+    /* your first line for it: the database's kind, axes and picture come along (yours wins whole) */
+    if (!mine && (map || wheel)) db_ext_text(vid, pid, extra, sizeof(extra));
+    if (wheel) {
+        strip_wheel(extra);
+        strncat(extra, wheel, sizeof(extra) - strlen(extra) - 1);
     }
     if (map || extra[0]) {
         fprintf(f, "%04X:%04X ", vid, pid);
@@ -229,4 +270,18 @@ esp_err_t lx_padmap_save(uint16_t vid, uint16_t pid, const char *name, const uin
     }
     if (!ok) ESP_LOGW(TAG, "could not write %s", MINE_FILE);
     return ok ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t lx_padmap_save(uint16_t vid, uint16_t pid, const char *name, const uint8_t *map)
+{
+    return save_line(vid, pid, name, map, NULL);
+}
+
+esp_err_t lx_padmap_save_wheel(uint16_t vid, uint16_t pid, const char *name, uint16_t range, int spring_pct)
+{
+    uint8_t map[LX_INPUT_MAP_BITS];
+    bool has = lx_padmap_load(vid, pid, map) != LX_PADMAP_NONE;     /* the buttons as they are now */
+    char w[40];
+    snprintf(w, sizeof(w), " range=%u spring=%d", (unsigned)range, spring_pct);
+    return save_line(vid, pid, name, has ? map : NULL, w);
 }

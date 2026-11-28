@@ -284,7 +284,14 @@ bool lx_wii_report(lx_wii_t *w, const uint8_t *p, size_t len, lx_pad_state_t *s,
         *has_m = true;
     }
     memset(s, 0, sizeof(*s));
-    if (ext && len >= (size_t)(ext - p) + next) ext_state(w, ext, next, core, s);
+    /* while an extension is being set up (or its plug wobbles) its bytes read all 0xFF: not a full-tilt stick */
+    bool ext_ok = ext && len >= (size_t)(ext - p) + next && w->st == ST_IDLE;
+    if (ext_ok && next >= 6) {
+        bool ff = true;
+        for (size_t i = 0; i < 6; i++) ff &= ext[i] == 0xFF;
+        ext_ok = !ff;
+    }
+    if (ext_ok) ext_state(w, ext, next, core, s);
     else if (w->ext == EXT_NUNCHUK) s->b = remote_upright(core);
     else if (w->ext == EXT_NONE || w->ext == EXT_UNKNOWN) s->b = remote_sideways(core);
     else s->b = core & W_HOME ? PAPP_BTN_HOME : 0;

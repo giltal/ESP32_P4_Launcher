@@ -396,7 +396,7 @@ typedef struct {
 /* ── INPT interface ─────────────────────────────────────────────────────── */
 
 #define PAPP_IF_INPT      PAPP_FOURCC('I', 'N', 'P', 'T')
-#define PAPP_IF_INPT_VER  4      /* v2: analog, v3: keyboard, v4: joystick, motion, rumble */
+#define PAPP_IF_INPT_VER  5      /* v2: analog, v3: keyboard, v4: joystick, motion, rumble, v5: wheel force feedback */
 
 #define PAPP_MAX_PLAYERS  4
 
@@ -497,6 +497,8 @@ enum {                           /* role of a joystick axis */
 #define PAPP_JOY_LIGHT    (1u << 2)  /* a light bar or player LEDs the launcher sets */
 #define PAPP_JOY_JOINED   (1u << 3)  /* a second device (a throttle) is merged into this player */
 #define PAPP_JOY_STD_BUTTONS (1u << 4) /* buttons are the PAPP_BTN_* bits (a pad read by model), not numbers */
+#define PAPP_JOY_FORCE    (1u << 5)  /* a force-feedback wheel: INPT v5 wheel_range / force / spring work on it
+                                        (rumble() shakes it) */
 
 typedef struct {
     uint8_t  connected;
@@ -547,6 +549,11 @@ typedef struct {
     /* strong = the heavy (left) motor, weak = the light (right) one, 0..65535; stops by itself after ms
      * (0 = until the next call), and when the app ends. False if the pad has no motors */
     bool     (*rumble)(int player, uint16_t strong, uint16_t weak, uint32_t ms);
+    /* v5: force-feedback wheels (PAPP_JOY_FORCE). All three go back to the user's settings when the app ends.
+     * False if the device can't (no FFB wheel there) */
+    bool     (*wheel_range)(int player, uint16_t degrees);  /* lock to lock, 40..900; 0 = the user's setting */
+    bool     (*force)(int player, int16_t force);            /* steady push: -32768 full left .. 32767 full right, 0 off */
+    bool     (*spring)(int player, int32_t strength);        /* centring spring 0..65535 (0 off); -1 = the user's */
 } papp_if_inpt_t;
 
 /* ── THRD interface ─────────────────────────────────────────────────────── */

@@ -148,6 +148,12 @@ typedef struct {
     int pkind;                      /* PAPP_PAD_* */
     lx_padmap_ext_t ext;            /* gamepads.txt: axis remaps */
     uint32_t ext_gen;
+    /* Output reports on the interrupt OUT endpoint (the DS4 ignores SET_REPORT rumble): the device opened
+       by the XInput client, as the HID driver keeps its handle to itself */
+    usb_device_handle_t out_dev;
+    uint8_t out_ep;
+    bool out_looked;
+    int32_t lg_range, lg_spring, lg_const;     /* Logitech force feedback: last sent, -1 = not yet */
 } dev_t;
 
 /* PSRAM: 7 KB with the joystick state; internal RAM is short at start-up on v1.x chips (0.38 test build:
@@ -227,8 +233,147 @@ static void sony_motion(dev_t *d, const uint8_t *p, int len)
     lx_input_pad_motion(d->player, &m);
 }
 
-/* Rumble and light bar by SET_REPORT (output; the data starts with the report id): DualShock 4 report
- * 0x05, DualSense 0x02 (layouts as in Linux's hid-playstation) */
+static void out_done(usb_transfer_t *t)
+{
+    if (t->status != USB_TRANSFER_STATUS_COMPLETED) ESP_LOGD(TAG, "output report: status %d", t->status);
+    usb_host_transfer_free(t);
+}
+
+/* The HID interface's interrupt OUT endpoint, first call only; 0 = none (SET_REPORT then) */
+static void find_out_ep(dev_t *d)
+{
+    d->out_looked = true;
+    hid_host_dev_params_t params;
+    const usb_config_desc_t *cfg;
+    if (hid_host_device_get_params(d->handle, &params) != ESP_OK) return;
+    d->out_dev = lx_input_usb_dev_open(params.addr);
+    if (!d->out_dev || usb_host_get_active_config_descriptor(d->out_dev, &cfg) != ESP_OK) return;
+    const uint8_t *p = (const uint8_t *)cfg, *end = p + cfg->wTotalLength;
+    bool ours = false;
+    for (; p + 2 <= end && p[0]; p += p[0]) {
+        if (p[1] == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
+            const usb_intf_desc_t *i = (const usb_intf_desc_t *)p;
+            ours = i->bInterfaceNumber == params.iface_num && i->bAlternateSetting == 0;
+        } else if (ours && p[1] == USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
+            const usb_ep_desc_t *e = (const usb_ep_desc_t *)p;
+            if ((e->bmAttributes & 0x03) == USB_TRANSFER_TYPE_INTR && !(e->bEndpointAddress & 0x80)) {
+                d->out_ep = e->bEndpointAddress;
+                break;
+            }
+        }
+    }
+    ESP_LOGI(TAG, "player %d: output reports on %s", d->player + 1, d->out_ep ? "the interrupt OUT endpoint" : "SET_REPORT");
+}
+
+/* An output report: interrupt OUT, as Linux and SDL send them, else SET_REPORT. r = the report as sent (with the
+ * id first when the device uses ids: id = r[0]; 0 = no ids) */
+static esp_err_t send_output(dev_t *d, uint8_t id, const uint8_t *r, size_t len)
+{
+    if (!d->out_looked) find_out_ep(d);
+    usb_transfer_t *t;
+    if (d->out_ep && usb_host_transfer_alloc(64, 0, &t) == ESP_OK) {
+        memcpy(t->data_buffer, r, len);
+        t->num_bytes = len;
+        t->device_handle = d->out_dev;
+        t->bEndpointAddress = d->out_ep;
+        t->callback = out_done;
+        t->context = NULL;
+        esp_err_t e = usb_host_transfer_submit(t);
+        if (e == ESP_OK) return ESP_OK;
+        usb_host_transfer_free(t);
+        return e;
+    }
+    return hid_class_request_set_report(d->handle, HID_REPORT_TYPE_OUTPUT, id, (uint8_t *)r, len);
+}
+
+/* ── Logitech wheels (commands as in Linux's hid-lg4ff: 7-byte output reports, no report id) ── */
+
+static bool logitech_wheel(uint16_t vid, uint16_t pid)
+{
+    /* Driving Force / EX (also the start-up mode of the multimode wheels), DF Pro, G25, DFGT, G27, G29 (PS3 mode),
+       G920 is XInput */
+    return vid == 0x046D && (pid == 0xC294 || pid == 0xC298 || pid == 0xC299 || pid == 0xC29A || pid == 0xC29B ||
+                             pid == 0xC24F);
+}
+
+static void lg_cmd(dev_t *d, uint8_t a, uint8_t b, uint8_t c, uint8_t e, uint8_t f)
+{
+    const uint8_t r[7] = { a, b, c, e, f, 0, 0 };
+    esp_err_t err = send_output(d, 0, r, sizeof(r));
+    if (err != ESP_OK) ESP_LOGW(TAG, "wheel command %02X %02X: %s", a, b, esp_err_to_name(err));
+}
+
+/* A G25 starts as a Driving Force EX (C294: 10-bit steering, 200 degrees, fewer buttons). Its native-mode command
+ * makes it reset its USB connection and come back as C299. true = sent, the device is going away */
+static bool lg_native_switch(dev_t *d)
+{
+    if (d->vid != 0x046D || d->pid != 0xC294) return false;
+    const usb_device_desc_t *dd;
+    if (!d->out_looked) find_out_ep(d);
+    if (!d->out_dev || usb_host_get_device_descriptor(d->out_dev, &dd) != ESP_OK) return false;
+    uint16_t bcd = dd->bcdDevice;
+    if ((bcd & 0xFF00) != 0x1200) {          /* G25 only (G27 = 0x123x, DFGT 0x13xx need other commands) */
+        ESP_LOGI(TAG, "Logitech wheel %04X:%04X bcdDevice %04X: compatibility mode kept", d->vid, d->pid, bcd);
+        return false;
+    }
+    ESP_LOGI(TAG, "Logitech G25 in compatibility mode: switching it to native mode");
+    lg_cmd(d, 0xF8, 0x10, 0, 0, 0);
+    return true;
+}
+
+/* Force feedback on the G25 / G27 (native): the lx_padout task calls it with what changed */
+static bool lg_ffb(const dev_t *d)
+{
+    return d->vid == 0x046D && (d->pid == 0xC299 || d->pid == 0xC29B);
+}
+
+/* Centring spring 0..65535 (hid-lg4ff's lg4ff_set_autocenter_default), 0 = off */
+static void lg_spring(dev_t *d, uint32_t mag)
+{
+    if (!mag) {
+        lg_cmd(d, 0xF5, 0, 0, 0, 0);
+        return;
+    }
+    uint32_t a, b;
+    if (mag <= 0xAAAA) {
+        a = 0x0C * mag;
+        b = 0x80 * mag;
+    } else {
+        a = 0x0C * 0xAAAA + 0x06 * (mag - 0xAAAA);
+        b = 0x80 * 0xAAAA + 0xFF * (mag - 0xAAAA);
+    }
+    a >>= 1;
+    lg_cmd(d, 0xFE, 0x0D, (uint8_t)(a / 0xAAAA), (uint8_t)(a / 0xAAAA), (uint8_t)(b / 0xAAAA));
+    lg_cmd(d, 0x14, 0, 0, 0, 0);
+}
+
+static void lg_out(void *ctx, const lx_pad_out_state_t *s)
+{
+    dev_t *d = ctx;
+    if (s->range != d->lg_range) {
+        d->lg_range = s->range;
+        lg_cmd(d, 0xF8, 0x81, s->range & 0xFF, s->range >> 8, 0);
+    }
+    if ((int32_t)s->spring != d->lg_spring) {
+        d->lg_spring = s->spring;
+        lg_spring(d, s->spring);
+    }
+    int f = s->force;
+    if (s->shake) {                         /* rumble: half the wheel's force at most, flipped by the task */
+        int amp = (s->strong > s->weak ? s->strong : s->weak) / 2;
+        f += s->shake == 1 ? amp : -amp;
+    }
+    int v = 0x80 + f / 256;                 /* constant force, 0x80 = none (lg4ff_play) */
+    v = v < 0 ? 0 : v > 255 ? 255 : v;
+    if (v != d->lg_const) {
+        d->lg_const = v;
+        if (v == 0x80) lg_cmd(d, 0x13, 0, 0, 0, 0);
+        else lg_cmd(d, 0x11, 0x08, (uint8_t)v, 0x80, 0);
+    }
+}
+
+/* Rumble and light bar (output report): DualShock 4 report 0x05, DualSense 0x02 (layouts as in Linux's
+ * hid-playstation) */
 static void sony_out(void *ctx, const lx_pad_out_state_t *s)
 {
     dev_t *d = ctx;
@@ -244,14 +389,14 @@ static void sony_out(void *ctx, const lx_pad_out_state_t *s)
         r[42] = 0x02;
         r[44] = lx_pad_ps5_leds(s->player);
         r[45] = s->r; r[46] = s->g; r[47] = s->b;
-        e = hid_class_request_set_report(d->handle, HID_REPORT_TYPE_OUTPUT, 0x02, r, 63);
+        e = send_output(d, r[0], r, 63);
     } else {
         r[0] = 0x05;
         r[1] = 0x07;                                    /* rumble, light bar, flash */
         r[4] = (uint8_t)(s->weak >> 8);
         r[5] = (uint8_t)(s->strong >> 8);
         r[6] = s->r; r[7] = s->g; r[8] = s->b;
-        e = hid_class_request_set_report(d->handle, HID_REPORT_TYPE_OUTPUT, 0x05, r, 32);
+        e = send_output(d, r[0], r, 32);
     }
     if (e != ESP_OK) ESP_LOGW(TAG, "player %d: output report failed: %s", d->player + 1, esp_err_to_name(e));
 }
@@ -357,8 +502,9 @@ static void parse_pad(dev_t *d, const uint8_t *p, int len)
 
 static void close_dev(dev_t *d)
 {
-    if (d->kind == DEV_PAD) lx_input_pad_detach(d->player);
+    if (d->kind == DEV_PAD) lx_input_pad_detach(d->player);    /* (waits for an output send in progress) */
     if (d->kind == DEV_KBD) lx_input_kbd_detach();
+    lx_input_usb_dev_close(d->out_dev);
     hid_host_device_close(d->handle);
     memset(d, 0, sizeof(*d));
 }
@@ -505,9 +651,15 @@ static void open_device(hid_host_device_handle_t h)
         return;
     }
 
+    if (d->kind == DEV_PAD && lg_native_switch(d)) {
+        d->kind = DEV_IGNORED;              /* it resets and comes back with its native id */
+        return;
+    }
     if (d->kind == DEV_PAD) {
         char name[24];
         product_name(h, d->vid, d->pid, name, sizeof(name));
+        /* Logitech wheels name their pedals X/Y/Z/Rz, not Accelerator / Brake */
+        if (d->has_layout && logitech_wheel(d->vid, d->pid)) d->pkind = PAPP_PAD_WHEEL;
         /* (pkind is a gamepad for the pads read by model: the layout isn't used for them) */
         int kind = d->has_layout && d->vid != 0x054C ? d->pkind : PAPP_PAD_GAMEPAD;
         d->pkind = kind;
@@ -523,6 +675,10 @@ static void open_device(hid_host_device_handle_t h)
             ds3_enable(h);
         } else if (d->vid == 0x054C && (d->pid == 0x05C4 || d->pid == 0x09CC || d->pid == 0x0CE6 || d->pid == 0x0DF2)) {
             lx_input_pad_set_out(d->player, sony_out, d);
+        } else if (lg_ffb(d)) {
+            d->lg_range = d->lg_spring = d->lg_const = -1;      /* nothing sent yet */
+            lx_input_pad_set_out(d->player, lg_out, d);
+            lx_input_pad_set_ffb(d->player, true);
         }
     } else if (d->kind == DEV_KBD) {
         lx_input_kbd_attach();

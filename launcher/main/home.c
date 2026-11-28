@@ -942,13 +942,8 @@ static void map_tick(void)
     else map_show_step();
 }
 
-static void on_map_start(lv_event_t *ev)
+static void map_begin(void)
 {
-    s_map_player = lx_input_pad_first();
-    if (s_map_player < 0) {
-        upd_message("Controller", "Connect a USB controller first.");
-        return;
-    }
     memset(s_map, 0xFF, sizeof(s_map));
     s_map_done = 0;
     s_map_armed = false;
@@ -958,6 +953,74 @@ static void on_map_start(lv_event_t *ev)
     map_layout(!lv_obj_has_flag(s_map_pic, LV_OBJ_FLAG_HIDDEN));
     lv_screen_load(s_map_scr);
     map_show_step();
+}
+
+/* A force-feedback wheel first gets its own settings: rotation and force strength (gamepads_mine.txt range= /
+ * spring=, applied at once), then the button mapping if asked */
+/* popup menu actions (on_menu_item) */
+enum { ACT_CLOSE, ACT_OPEN, ACT_RENAME, ACT_DELETE, ACT_DELETE_YES, ACT_PICK, ACT_OUT, ACT_NEW_MOVE, ACT_FORGET,
+       ACT_STORE_OPEN, ACT_WHEEL_ROT, ACT_WHEEL_SPRING, ACT_WHEEL_MAP, ACT_WHEEL_DONE,
+       ACT_TO_FOLDER /* last: + folder index */ };
+static const uint16_t k_wheel_rot[] = { 200, 500, 900 };
+static const struct { int pct; const char *name; } k_wheel_spring[] = {
+    { 0, "Off" }, { 25, "Light" }, { 50, "Medium" }, { 75, "Strong" },
+};
+static void menu_open(const char *title, const char *text, int items);
+static void menu_add(const char *text, int act);
+
+static void wheel_menu(void)
+{
+    uint16_t range;
+    int spring;
+    if (!lx_input_wheel_settings(s_map_player, &range, &spring)) {
+        show_settings();
+        return;
+    }
+    const char *sname = "Custom";
+    for (size_t i = 0; i < sizeof(k_wheel_spring) / sizeof(k_wheel_spring[0]); i++)
+        if (k_wheel_spring[i].pct == spring) sname = k_wheel_spring[i].name;
+    papp_joystick_t j;
+    lx_input_joystick(s_map_player, &j);
+    char rot[40], spr[40];
+    snprintf(rot, sizeof(rot), "Rotation: %u\xC2\xB0", (unsigned)range);
+    snprintf(spr, sizeof(spr), "Force strength: %s", sname);
+    menu_open(j.name[0] ? j.name : "Wheel", "Saved for this wheel. Games may change them while they run.", 4);
+    menu_add(rot, ACT_WHEEL_ROT);
+    menu_add(spr, ACT_WHEEL_SPRING);
+    menu_add("Map buttons", ACT_WHEEL_MAP);
+    menu_add("Done", ACT_WHEEL_DONE);
+}
+
+/* the next value of the list after the current one */
+static void wheel_step(bool rot)
+{
+    uint16_t range;
+    int spring;
+    if (!lx_input_wheel_settings(s_map_player, &range, &spring)) return;
+    if (rot) {
+        size_t n = sizeof(k_wheel_rot) / sizeof(k_wheel_rot[0]), i = 0;
+        while (i < n && k_wheel_rot[i] <= range) i++;
+        range = k_wheel_rot[i < n ? i : 0];
+    } else {
+        size_t n = sizeof(k_wheel_spring) / sizeof(k_wheel_spring[0]), i = 0;
+        while (i < n && k_wheel_spring[i].pct <= spring) i++;
+        spring = k_wheel_spring[i < n ? i : 0].pct;
+    }
+    if (lx_input_wheel_set_settings(s_map_player, range, spring) != ESP_OK)
+        ESP_LOGW(TAG, "wheel settings not saved");
+}
+
+static void on_map_start(lv_event_t *ev)
+{
+    s_map_player = lx_input_pad_first();
+    if (s_map_player < 0) {
+        upd_message("Controller", "Connect a USB controller first.");
+        return;
+    }
+    uint16_t range;
+    int spring;
+    if (lx_input_wheel_settings(s_map_player, &range, &spring)) wheel_menu();
+    else map_begin();
 }
 
 static void on_map_cancel(lv_event_t *ev)
@@ -1650,8 +1713,6 @@ static void bt_tick(void)
 
 static lv_obj_t *s_update_btn;
 static void on_upd_check(lv_event_t *ev);
-enum { ACT_CLOSE, ACT_OPEN, ACT_RENAME, ACT_DELETE, ACT_DELETE_YES, ACT_PICK, ACT_OUT, ACT_NEW_MOVE, ACT_FORGET,
-       ACT_STORE_OPEN, ACT_TO_FOLDER };
 static lv_obj_t *s_menu;
 static void menu_open(const char *title, const char *text, int items);
 static void menu_add(const char *text, int act);
@@ -2198,6 +2259,13 @@ static void on_menu_item(lv_event_t *ev)
     }
     case ACT_OUT: move_app(s_target, ""); break;
     case ACT_FORGET: lx_net_forget(); break;
+    case ACT_WHEEL_ROT:
+    case ACT_WHEEL_SPRING:
+        wheel_step(act == ACT_WHEEL_ROT);
+        wheel_menu();
+        break;
+    case ACT_WHEEL_MAP: map_begin(); break;
+    case ACT_WHEEL_DONE: show_settings(); break;
     case ACT_STORE_OPEN: store_open(s_target_id[0] ? s_target_id : s_target_name); break;
     case ACT_NEW_MOVE:
         s_name_move = true;

@@ -207,6 +207,21 @@ bool papp_input_rumble(int player, uint16_t strong, uint16_t weak, uint32_t ms)
     return INPT && INPT->hdr.version >= 4 && INPT->rumble && INPT->rumble(player, strong, weak, ms);
 }
 
+bool papp_input_wheel_range(int player, uint16_t degrees)
+{
+    return INPT && INPT->hdr.version >= 5 && INPT->wheel_range && INPT->wheel_range(player, degrees);
+}
+
+bool papp_input_force(int player, int16_t force)
+{
+    return INPT && INPT->hdr.version >= 5 && INPT->force && INPT->force(player, force);
+}
+
+bool papp_input_spring(int player, int32_t strength)
+{
+    return INPT && INPT->hdr.version >= 5 && INPT->spring && INPT->spring(player, strength);
+}
+
 /* ── Threads ────────────────────────────────────────────────────────────── */
 
 const papp_if_thrd_t *papp_if_thrd(void) { return THRD; }

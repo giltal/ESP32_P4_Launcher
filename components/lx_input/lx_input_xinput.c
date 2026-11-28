@@ -33,6 +33,7 @@ typedef struct {
 
 static usb_host_client_handle_t s_client;
 static xpad_t s_pads[MAX_PADS];
+
 static uint8_t s_new[8];
 static volatile int s_nnew;
 
@@ -285,6 +286,17 @@ static void client_task(void *arg)
                 ESP_LOGW(TAG, "player %d: restarted after a transfer error: %s", p->player + 1, esp_err_to_name(e));
             }
     }
+}
+
+usb_device_handle_t lx_input_usb_dev_open(uint8_t addr)
+{
+    usb_device_handle_t dev;
+    return s_client && usb_host_device_open(s_client, addr, &dev) == ESP_OK ? dev : NULL;
+}
+
+void lx_input_usb_dev_close(usb_device_handle_t dev)
+{
+    if (dev && s_client) usb_host_device_close(s_client, dev);
 }
 
 esp_err_t lx_input_xinput_start(void)

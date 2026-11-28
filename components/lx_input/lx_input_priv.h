@@ -5,6 +5,12 @@
 
 esp_err_t lx_input_usb_start(void);
 esp_err_t lx_input_xinput_start(void);     /* after usb_start: the USB host is installed */
+/* A USB device opened by the XInput client (for another driver's device: its handle for transfers on
+ * endpoints that driver claimed). NULL: not possible. Close it before the device is gone for good */
+#include <stdint.h>
+struct usb_device_handle_s;                 /* = usb_device_handle_t (usb_host.h stays out of this header) */
+struct usb_device_handle_s *lx_input_usb_dev_open(uint8_t addr);
+void lx_input_usb_dev_close(struct usb_device_handle_s *dev);       /* NULL: nothing */
 
 /* Button mappings as text on the SD card (lx_padmap.c) */
 #include <stdint.h>
@@ -12,6 +18,8 @@ esp_err_t lx_input_xinput_start(void);     /* after usb_start: the USB host is i
 enum { LX_PADMAP_NONE, LX_PADMAP_MINE, LX_PADMAP_DB };
 int       lx_padmap_load(uint16_t vid, uint16_t pid, uint8_t *map);     /* -> LX_PADMAP_ */
 esp_err_t lx_padmap_save(uint16_t vid, uint16_t pid, const char *name, const uint8_t *map);  /* NULL: remove */
+/* range= / spring= on your line (made from the database's when you have none), the buttons kept */
+esp_err_t lx_padmap_save_wheel(uint16_t vid, uint16_t pid, const char *name, uint16_t range, int spring_pct);
 /* The 0.38 additions of a pad's line: kind, axis remaps, picture (gamepads_mine.txt's line wins whole) */
 #define LX_PADMAP_AXES 8
 enum { LX_PADAX_LX, LX_PADAX_LY, LX_PADAX_RX, LX_PADAX_RY, LX_PADAX_LT, LX_PADAX_RT };
@@ -20,6 +28,9 @@ typedef struct {
     uint8_t naxis;
     struct { uint8_t role, to; bool inv; } axis[LX_PADMAP_AXES];   /* HID_AX_ -> LX_PADAX_ (0xFF = none) */
     char    pic[24];
+    uint16_t range;             /* range=<degrees>: a force-feedback wheel's rotation, 0 = not given */
+    bool    has_spring;
+    uint8_t spring;             /* spring=<percent> 0..100: its centring spring */
 } lx_padmap_ext_t;
 bool      lx_padmap_ext(uint16_t vid, uint16_t pid, lx_padmap_ext_t *ext);   /* false: no line */
 

@@ -92,6 +92,10 @@ int lx_pad_kind(const hid_layout_t *l)
     if (l->device == HID_DEV_GAMEPAD) return PAPP_PAD_GAMEPAD;
     if (x && y && (throttle || hid_has(l, HID_AX_RUDDER))) return PAPP_PAD_FLIGHTSTICK;
     if (!(x && y) && (throttle || hid_has(l, HID_AX_Z))) return PAPP_PAD_THROTTLE;
+    /* X, Y and Z alone on a joystick: Z is its throttle (Logitech Attack 3, Extreme 3D has Rz too) */
+    if (x && y && hid_has(l, HID_AX_Z) && !hid_has(l, HID_AX_RX) && !hid_has(l, HID_AX_RY) &&
+        !hid_has(l, HID_AX_RZ) && l->device == HID_DEV_JOYSTICK)
+        return PAPP_PAD_FLIGHTSTICK;
     /* a stick that twists (Rz) with neither a second stick (Z/Rx/Ry) nor triggers */
     if (x && y && hid_has(l, HID_AX_RZ) && !hid_has(l, HID_AX_Z) && !hid_has(l, HID_AX_RX) &&
         !hid_has(l, HID_AX_RY) && l->device == HID_DEV_JOYSTICK)

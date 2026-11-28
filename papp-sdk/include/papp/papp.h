@@ -162,6 +162,16 @@ bool     papp_input_motion(int player, papp_motion_t *out);
  * Stops when the app ends. False if the pad has no motors or the launcher predates INPT v4.
  *   papp_input_rumble(0, 40000, 20000, 200);      // a short hit */
 bool     papp_input_rumble(int player, uint16_t strong, uint16_t weak, uint32_t ms);
+/* Force-feedback wheels (the joystick's flags have PAPP_JOY_FORCE; launcher >= 0.38, INPT v5). Each returns false
+ * when the player's device can't, or the launcher is older. Everything goes back to the user's own settings
+ * (Settings -> Map controller: rotation, strength) when the app ends; the user's strength scales what the app asks
+ * for (Light = as asked, up to 2x; Off = none), so tune for Light. rumble() shakes such a wheel.
+ *   papp_input_wheel_range(0, 270);           // lock to lock, 40..900 degrees; 0 = the user's setting
+ *   papp_input_force(0, -12000);              // a steady push to the left (-32768..32767), 0 = none
+ *   papp_input_spring(0, 30000);              // centring spring 0..65535, 0 = off, -1 = the user's        */
+bool     papp_input_wheel_range(int player, uint16_t degrees);
+bool     papp_input_force(int player, int16_t force);
+bool     papp_input_spring(int player, int32_t strength);
 
 /* ── Threads ────────────────────────────────────────────────────────────────
  * NULL / false when the launcher has no THRD. cfg may be NULL (8 KB internal

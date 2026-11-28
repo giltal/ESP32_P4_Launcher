@@ -51,6 +51,13 @@ typedef struct {
     int64_t  rum_until;             /* 0 = until changed */
     lx_pad_out_state_t sent;        /* last sent */
     bool     out_fresh;             /* never sent: send the lights */
+    /* force-feedback wheel (lx_input_pad_set_ffb): what the app asked for, else the user's (ext range / spring) */
+    bool     ffb;
+    uint16_t app_range;             /* 0 = the user's */
+    int32_t  app_spring;            /* -1 = the user's */
+    int16_t  app_force;
+    int64_t  shake_at;              /* the next flip of a rumble shake */
+    uint8_t  shake;
 } pad_t;
 
 static SemaphoreHandle_t s_lock;
@@ -476,7 +483,7 @@ bool lx_input_joystick(int player, papp_joystick_t *out)
         out->vid = p->st.vid;
         out->pid = p->st.pid;
         snprintf(out->name, sizeof(out->name), "%s", p->st.name);
-        if (p->out_fn) out->flags |= PAPP_JOY_RUMBLE | PAPP_JOY_LIGHT;
+        if (p->out_fn) out->flags |= p->ffb ? PAPP_JOY_RUMBLE | PAPP_JOY_FORCE : PAPP_JOY_RUMBLE | PAPP_JOY_LIGHT;
         if (p->has_motion) out->flags |= PAPP_JOY_MOTION;
         if (p->joined) {                    /* the throttle's controls after the stick's */
             papp_joystick_t t;
@@ -539,6 +546,11 @@ void lx_input_pad_set_out(int player, lx_pad_out_fn fn, void *ctx)
     p->out_ctx = ctx;
     p->out_fresh = fn != NULL;
     memset(&p->sent, 0, sizeof(p->sent));
+    p->ffb = false;                         /* (set_ffb after this) */
+    p->app_range = 0;
+    p->app_spring = -1;
+    p->app_force = 0;
+    p->shake = 0;
     if (fn) {                               /* a short buzz: this pad is player N */
         p->rum_strong = p->rum_weak = 0x6000;
         p->rum_until = esp_timer_get_time() + OUT_BUZZ_MS * 1000;
@@ -569,9 +581,96 @@ bool lx_input_rumble(int player, uint16_t strong, uint16_t weak, uint32_t ms)
 void lx_input_rumble_stop(void)
 {
     LOCK();
-    for (int i = 0; i < PAPP_MAX_PLAYERS; i++) s_pads[i].rum_strong = s_pads[i].rum_weak = 0;
+    for (int i = 0; i < PAPP_MAX_PLAYERS; i++) {
+        pad_t *p = &s_pads[i];
+        p->rum_strong = p->rum_weak = 0;
+        p->app_range = 0;                   /* wheels: the user's rotation and spring again, no push */
+        p->app_spring = -1;
+        p->app_force = 0;
+    }
     UNLOCK();
     out_kick();
+}
+
+void lx_input_pad_set_ffb(int player, bool on)
+{
+    if (player < 0 || player >= PAPP_MAX_PLAYERS) return;
+    LOCK();
+    s_pads[player].ffb = on && s_pads[player].out_fn;
+    s_pads[player].out_fresh = true;        /* send range and spring */
+    UNLOCK();
+    out_kick();
+}
+
+/* A force-feedback wheel at player, locked; NULL = none */
+static pad_t *ffb_pad(int player)
+{
+    if (player < 0 || player >= PAPP_MAX_PLAYERS) return NULL;
+    pad_t *p = &s_pads[player];
+    return p->attached && p->out_fn && p->ffb ? p : NULL;
+}
+
+bool lx_input_wheel_range(int player, uint16_t degrees)
+{
+    LOCK();
+    pad_t *p = ffb_pad(player);
+    if (p) p->app_range = degrees == 0 ? 0 : degrees < 40 ? 40 : degrees > 900 ? 900 : degrees;
+    UNLOCK();
+    if (p) out_kick();
+    return p != NULL;
+}
+
+bool lx_input_force(int player, int16_t force)
+{
+    LOCK();
+    pad_t *p = ffb_pad(player);
+    if (p) p->app_force = force;
+    UNLOCK();
+    if (p) out_kick();
+    return p != NULL;
+}
+
+bool lx_input_spring(int player, int32_t strength)
+{
+    LOCK();
+    pad_t *p = ffb_pad(player);
+    if (p) p->app_spring = strength < 0 ? -1 : strength > 65535 ? 65535 : strength;
+    UNLOCK();
+    if (p) out_kick();
+    return p != NULL;
+}
+
+bool lx_input_wheel_settings(int player, uint16_t *range, int *spring_pct)
+{
+    LOCK();
+    pad_t *p = ffb_pad(player);
+    if (p) {
+        *range = p->ext.range ? p->ext.range : LX_PAD_RANGE_DEFAULT;
+        *spring_pct = p->ext.has_spring ? p->ext.spring : LX_PAD_SPRING_DEFAULT;
+    }
+    UNLOCK();
+    return p != NULL;
+}
+
+esp_err_t lx_input_wheel_set_settings(int player, uint16_t range, int spring_pct)
+{
+    LOCK();
+    pad_t *p = ffb_pad(player);
+    uint16_t vid = p ? p->st.vid : 0, pid = p ? p->st.pid : 0;
+    char name[sizeof(p->st.name)];
+    if (p) snprintf(name, sizeof(name), "%s", p->st.name);
+    UNLOCK();
+    if (!p) return ESP_ERR_INVALID_ARG;
+    esp_err_t e = lx_padmap_save_wheel(vid, pid, name, range, spring_pct);
+    LOCK();
+    if (ffb_pad(player)) {                  /* in use now: the line's ext is read at attach */
+        s_pads[player].ext.range = range;
+        s_pads[player].ext.has_spring = true;
+        s_pads[player].ext.spring = (uint8_t)spring_pct;
+    }
+    UNLOCK();
+    out_kick();
+    return e;
 }
 
 /* Sends what changed to each pad's source; ends rumbles whose time is up */
@@ -588,10 +687,38 @@ static void out_task(void *arg)
                 p->rum_until = 0;
             }
             if (p->rum_until && (!next || p->rum_until < next)) next = p->rum_until;
-            lx_pad_out_state_t want = {
-                .strong = p->rum_strong, .weak = p->rum_weak, .player = (uint8_t)i,
-                .r = k_player_rgb[i][0], .g = k_player_rgb[i][1], .b = k_player_rgb[i][2],
-            };
+            lx_pad_out_state_t want;
+            memset(&want, 0, sizeof(want));     /* (compared whole, padding included) */
+            want.strong = p->rum_strong;
+            want.weak = p->rum_weak;
+            want.player = (uint8_t)i;
+            want.r = k_player_rgb[i][0];
+            want.g = k_player_rgb[i][1];
+            want.b = k_player_rgb[i][2];
+            if (p->ffb) {
+                want.range = p->app_range ? p->app_range : p->ext.range ? p->ext.range : LX_PAD_RANGE_DEFAULT;
+                /* the user's strength (spring=, Map controller): the centring spring outside apps, and a gain on
+                   what apps ask for: Light (25 %, the default) = as asked, Medium 1.5x, Strong 2x, Off = none */
+                int pct = p->ext.has_spring ? p->ext.spring : LX_PAD_SPRING_DEFAULT;
+                int gain = pct ? 50 + pct * 2 : 0;      /* percent */
+                int32_t sp = p->app_spring >= 0 ? p->app_spring * gain / 100 : pct * 65535 / 100;
+                int32_t fo = (int32_t)p->app_force * gain / 100;
+                want.spring = (uint16_t)(sp > 65535 ? 65535 : sp);
+                want.force = (int16_t)(fo > 32767 ? 32767 : fo < -32767 ? -32767 : fo);
+                uint32_t rs = (uint32_t)want.strong * gain / 100, rw = (uint32_t)want.weak * gain / 100;
+                want.strong = (uint16_t)(rs > 65535 ? 65535 : rs);
+                want.weak = (uint16_t)(rw > 65535 ? 65535 : rw);
+                if (p->rum_strong || p->rum_weak) {     /* rumble = a shake, flipped every LX_PAD_SHAKE_MS */
+                    if (!p->shake || now >= p->shake_at) {
+                        p->shake = p->shake == 1 ? 2 : 1;
+                        p->shake_at = now + LX_PAD_SHAKE_MS * 1000;
+                    }
+                    if (!next || p->shake_at < next) next = p->shake_at;
+                } else {
+                    p->shake = 0;
+                }
+                want.shake = p->shake;
+            }
             lx_pad_out_fn fn = p->out_fn;
             void *ctx = p->out_ctx;
             bool send = fn && (p->out_fresh || memcmp(&want, &p->sent, sizeof(want)) != 0);

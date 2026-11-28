@@ -106,7 +106,9 @@ components/lx_input/      input manager: USB HID gamepads/keyboards, XInput (Xbo
                           /sd/config/gamepads_mine.txt (Map controller) wins over /sd/config/gamepads.txt (shared database,
                           SDcard/config/gamepads.txt, downloaded by the Store); NVS "padmap" = pre-0.23, read-only fallback;
                           0.38 (docs/GAMEPAD_PLAN.md): axes by role, kinds (flight stick/throttle/wheel/Wii; a throttle joins
-                          the stick's player), INPT v4 joystick/motion/rumble, output task lx_padout (rumble + lights: Sony,
+                          the stick's player), INPT v4 joystick/motion/rumble, INPT v5 wheel range/force/spring (Logitech G25 & co: native-mode switch
+                          + lg4ff commands in lx_input_usb.c; gamepads.txt range=/spring=; Map controller = Rotation + Force strength,
+                          the strength scales apps' forces; DevLink input range|force|spring), output task lx_padout (rumble + lights: Sony,
                           Switch, XInput, Wii), lx_pad_wii.c, gamepads.txt kind=/pic=/axis remaps; pictures in /sd/config/pads
                           (tools/make_pad_pictures.py -> SDcard/config/pads, Store "pads") shown by Map controller;
                           lx_input's pad tables are in PSRAM (internal RAM is short at start-up on v1.x chips)

@@ -42,7 +42,14 @@ int      lx_input_analog(int ch);
 bool     lx_input_joystick(int player, papp_joystick_t *out);
 bool     lx_input_motion(int player, papp_motion_t *out);
 bool     lx_input_rumble(int player, uint16_t strong, uint16_t weak, uint32_t ms);  /* false: no motors */
-void     lx_input_rumble_stop(void);                /* every motor off (app teardown) */
+void     lx_input_rumble_stop(void);                /* every motor off, wheels back to the user's settings (app teardown) */
+/* INPT v5, force-feedback wheels; false: not one */
+bool     lx_input_wheel_range(int player, uint16_t degrees);   /* 0 = the user's */
+bool     lx_input_force(int player, int16_t force);
+bool     lx_input_spring(int player, int32_t strength);        /* -1 = the user's */
+/* The user's settings for the player's wheel (gamepads_mine.txt range= / spring=): false = no FFB wheel there */
+bool     lx_input_wheel_settings(int player, uint16_t *range, int *spring_pct);
+esp_err_t lx_input_wheel_set_settings(int player, uint16_t range, int spring_pct);   /* saved; task with an internal stack */
 
 /* Sources: gamepads */
 int  lx_input_pad_attach(const char *name, uint16_t vid, uint16_t pid);   /* -> player or -1 */
@@ -64,9 +71,20 @@ typedef struct {
     uint16_t strong, weak;      /* motors 0..65535: heavy (left), light (right) */
     uint8_t  r, g, b;           /* light bar: the player's colour */
     uint8_t  player;            /* 0..3: player LEDs */
+    /* force-feedback wheels (lx_input_pad_set_ffb): */
+    int16_t  force;             /* steady push, -32768 left .. 32767 right; a rumble adds the shake */
+    uint16_t spring;            /* centring spring 0..65535 */
+    uint16_t range;             /* degrees lock to lock */
+    uint8_t  shake;             /* rumble on a wheel: 0 none, 1 / 2 = push one way / the other (strong, weak: how
+                                   hard); the task flips it every LX_PAD_SHAKE_MS */
 } lx_pad_out_state_t;
+#define LX_PAD_SHAKE_MS 30
+#define LX_PAD_RANGE_DEFAULT  900
+#define LX_PAD_SPRING_DEFAULT 25    /* percent */
 typedef void (*lx_pad_out_fn)(void *ctx, const lx_pad_out_state_t *s);
 void lx_input_pad_set_out(int player, lx_pad_out_fn fn, void *ctx);
+/* The output function also drives a force-feedback wheel (force, spring, range, shake); after set_out */
+void lx_input_pad_set_ffb(int player, bool on);
 
 /* Sources: HID gamepads of other transports (Bluetooth, lx_input_hidpad.c). open attaches a
  * player (NULL: no free slot); desc = the HID report descriptor (parsed here, may be freed after);

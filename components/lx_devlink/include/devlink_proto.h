@@ -54,7 +54,9 @@ enum {
 
 /* INPUT: first byte selects the request */
 enum { DL_INPUT_PAD = 1, DL_INPUT_KEY = 2, DL_INPUT_STATE = 3, DL_INPUT_UNMAP = 4,   /* UNMAP: u8 player */
-       DL_INPUT_RUMBLE = 5 };   /* RUMBLE: u8 player, u16 strong, u16 weak, u32 ms; reply "ok" or "no motors" */
+       DL_INPUT_RUMBLE = 5,     /* RUMBLE: u8 player, u16 strong, u16 weak, u32 ms; reply "ok" or "no motors" */
+       DL_INPUT_WHEEL = 6 };    /* WHEEL: u8 player, u8 what (0 range, 1 force, 2 spring), i32 value; reply "ok" or
+                                   "no force feedback" (as an app's INPT v5 calls: undone by the next app's end) */
 
 typedef struct __attribute__((packed)) {
     uint8_t  kind;            /* DL_INPUT_PAD                 */

@@ -12,3 +12,4 @@
 054C:09CC  A=B B=A X=Y Y=X  # Sony DualShock 4 (v2)
 2DC8:310A  SELECT=START START=SELECT  # 8BitDo Ultimate 2C Wired
 0079:0011  # Generic USB NES pad (DragonRise)
+046D:C299  HOME=- MISC=-  kind=wheel Z=-RT RZ=-LT pic=wheel  # Logitech G25 (native mode: gas Z, brake Rz, clutch Y; gears = buttons 13-19)

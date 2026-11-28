@@ -73,6 +73,31 @@ static bool inpt_rumble(int player, uint16_t strong, uint16_t weak, uint32_t ms)
     return c;
 }
 
+/* v5: back to the user's settings at teardown (lx_input_rumble_stop) */
+static bool inpt_wheel_range(int player, uint16_t degrees)
+{
+    SVC_ENTER();
+    bool c = lx_input_wheel_range(player, degrees);
+    SVC_LEAVE();
+    return c;
+}
+
+static bool inpt_force(int player, int16_t force)
+{
+    SVC_ENTER();
+    bool c = lx_input_force(player, force);
+    SVC_LEAVE();
+    return c;
+}
+
+static bool inpt_spring(int player, int32_t strength)
+{
+    SVC_ENTER();
+    bool c = lx_input_spring(player, strength);
+    SVC_LEAVE();
+    return c;
+}
+
 const papp_if_inpt_t lx_if_inpt = {
     .hdr = { PAPP_IF_INPT, PAPP_IF_INPT_VER, sizeof(papp_if_inpt_t) },
     .gamepad    = inpt_gamepad,
@@ -85,4 +110,7 @@ const papp_if_inpt_t lx_if_inpt = {
     .joystick   = inpt_joystick,
     .motion     = inpt_motion,
     .rumble     = inpt_rumble,
+    .wheel_range = inpt_wheel_range,
+    .force      = inpt_force,
+    .spring     = inpt_spring,
 };

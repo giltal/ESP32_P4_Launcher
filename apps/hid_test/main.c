@@ -72,6 +72,15 @@ static const uint8_t k_stick[] = {
     0xC0, 0xC0,
 };
 
+/* 3-axis stick, Logitech Attack 3 style: X, Y, and the throttle as Z, 8 bit; 11 buttons, no hat */
+static const uint8_t k_stick3[] = {
+    0x05,0x01, 0x09,0x04, 0xA1,0x01, 0xA1,0x02,
+    0x15,0x00, 0x26,0xFF,0x00, 0x75,0x08, 0x95,0x03, 0x09,0x30, 0x09,0x31, 0x09,0x32, 0x81,0x02,
+    0x05,0x09, 0x15,0x00, 0x25,0x01, 0x19,0x01, 0x29,0x0B, 0x75,0x01, 0x95,0x0B, 0x81,0x02,
+    0x75,0x05, 0x95,0x01, 0x81,0x01,
+    0xC0, 0xC0,
+};
+
 /* Throttle unit: Simulation-page throttle and rudder plus 2 hats in report 1, 20 buttons in report 2 */
 static const uint8_t k_throttle[] = {
     0x05,0x01, 0x09,0x04, 0xA1,0x01,
@@ -235,6 +244,11 @@ int main(int argc, char **argv)
     lx_pad_joystick(&l, PAPP_PAD_FLIGHTSTICK, &s, &j);
     CHECK(j.naxes == 4 && j.role[0] == PAPP_AXIS_X && j.role[2] == PAPP_AXIS_RZ && j.role[3] == PAPP_AXIS_SLIDER);
     CHECK(j.axis[3] == -32768 && j.nbuttons == 12 && j.buttons == 0x801 && j.nhats == 1 && j.hat[0] == 0);
+
+    /* 3-axis stick: Z is the throttle */
+    CHECK(hid_layout_parse(k_stick3, sizeof(k_stick3), &l));
+    CHECK(l.device == HID_DEV_JOYSTICK && l.buttons == 11 && hid_has(&l, HID_AX_Z) && !hid_has(&l, HID_AX_RZ));
+    CHECK(lx_pad_kind(&l) == PAPP_PAD_FLIGHTSTICK);
 
     /* Throttle over two reports: each one updates only its own controls */
     CHECK(hid_layout_parse(k_throttle, sizeof(k_throttle), &l));

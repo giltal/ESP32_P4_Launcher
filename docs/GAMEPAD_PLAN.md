@@ -117,14 +117,41 @@ phase 1 need the devices plugged in or paired.
 Done and checked without the devices:
 - Phase 1: parser by axis role (Desktop + Simulation pages, 2 hats, 32 buttons, 4 report ids), kind detection,
   flight-stick / wheel views, throttle joins the flight stick's player. `hid_test` (test descriptors, Wii scripts):
-  0 failures on COM10.
+  0 failures on COM10. Real stick: Logitech Attack 3 (046D:C214, low speed, X/Y + throttle as Z, 11 buttons) was
+  a "gamepad" until a rule for joysticks with X, Y, Z and no Rx/Ry/Rz (Z = throttle); now a flight stick, stick
+  and throttle over their full travel (throttle forward = RT 65535), trigger = A, works in the launcher (COM6).
+  Logitech G25: starts as a Driving Force EX (046D:C294, bcdDevice 0x12xx); lx_input_usb.c sends hid-lg4ff's
+  native-mode command F8 10 (interrupt OUT, 7 bytes, no report id), it is back as C299 ~0.4 s later; then 900
+  degrees (F8 81) and a 25 % centring spring (FE 0D .. + 14). Logitech wheel ids are kind wheel (their pedals are
+  plain Y/Z/Rz). C299: steering X full range, gas Z, brake Rz, clutch Y (all 32767 released), gamepads.txt
+  "Z=-RT RZ=-LT"; 19 buttons (paddles L1/R1, top A B X Y, red L2 R2 L3 R3 SELECT START), hat. Checked on COM6.
+  H-shifter gears 1-6 = buttons 13-18, reverse 19; sequential mode = 13/14. 13 and 14 land on HOME / MISC (1st
+  gear opened the HOME menu), so the line has "HOME=- MISC=-": gears only in the joystick view. Spring felt (gentle).
+  Wheel force feedback (INPT v5, launcher 0.38): `papp_input_wheel_range` / `_force` / `_spring`, joystick flag
+  PAPP_JOY_FORCE; rumble on a wheel = a shake (constant force flipped every 30 ms). Map controller on a wheel opens
+  its settings first: Rotation 200/500/900 and Force strength Off/Light/Medium/Strong (gamepads_mine.txt range= /
+  spring=); the strength is the centring spring outside apps and a gain on what apps ask for (Light = as asked,
+  Medium 1.5x, Strong 2x, Off = none). DevLink `input range|force|spring`. Felt on COM6: push right / left,
+  shake, rotation, strength. Dustline 1.2.3 (ESP32_P4_3D_Engine) has an "FF wheel" control mode using it: liked.
+  Known: after some board resets (3 of 8 reboots, then every one) the G25 doesn't answer the first descriptor
+  request ("ENUM: CHECK_SHORT_DEV_DESC FAILED", port disabled) and needs a replug. Tried, didn't help: more port
+  resets from the launcher (SET_FEATURE PORT_RESET, 2-14 s later: the same failure each time) and port power off/on
+  (the 7" board's hub switches power ganged: one port does nothing; all ports off made IDF's usb_host task panic
+  with the CSR dongle on another port, a boot loop). Left as is: replug the wheel.
 - Phase 2: INPT v4 (`papp_input_joystick` / `_motion` / `_rumble`; the SDK falls back to `gamepad` on older
   launchers), DevLink `input state --all`, `input rumble`. Controller test app (Store, Tools; icon).
 - Phase 2b: rumble + lights for DualShock 4 / DualSense (USB and Bluetooth reports with CRC), Switch Pro HD rumble,
   XInput, Wii Remote; 150 ms buzz on connect, player colours; stopped at app exit. On COM6 the DS4 over USB:
-  motion reads 1 g, `input rumble` accepted, no output errors. **Not felt or seen yet.**
+  motion reads 1 g. DS4 USB rumble felt (heavy, light, both) once output reports went to the interrupt OUT
+  endpoint: a genuine 054C:09CC accepts SET_REPORT rumble without an error and ignores it (lx_input_usb.c
+  send_output, SET_REPORT only without an OUT endpoint). DS4 Bluetooth rumble felt too (CSR dongle, report 0x11).
+  Others not felt or seen yet.
 - Phase 3: Wii Remote, Nunchuk, Classic Controller, Wii U Pro: PIN pairing (SYNC and 1+2), extension set-up,
-  sideways / upright layouts, rumble bit, accelerometer. Scripted only.
+  sideways / upright layouts, rumble bit, accelerometer. On COM6 (CSR dongle) an original RVL-CNT-01 +
+  Nunchuk: paired with SYNC, P2; rumble felt, LED 2 lit; D-pad, A, B, 1, 2, HOME, -, +, C, Z, Nunchuk stick
+  (full range) and accelerometer read right. Extension bytes read all 0xFF while it is being set up or its
+  plug wobbles: dropped (they were a full-tilt stick); after a reconnect no spike. Not tried: sideways without
+  the Nunchuk in a game, Classic Controller, Wii U Pro, 1+2 pairing.
 - Phase 4: `tools/make_pad_pictures.py` draws 9 families into `SDcard/config/pads` (.png + positions); Map
   controller shows the pad's picture and rings the asked button (checked on COM6 with the DS4: PlayStation
   picture). The Store keeps `/sd/config/pads` current ("pads" in apps.json; checked with a local catalogue).
@@ -132,8 +159,8 @@ Done and checked without the devices:
 Also done: launcher 0.38.0 moves boards to 6.5 MB app slots (ARCHITECTURE, "Flash layout" under self-update), tested on all three.
 
 To test with the devices: real flight stick, throttle (and both together), wheel (axes, pedals, kind detection);
-rumble and light bar felt/seen on DS4 (USB, Bluetooth), DualSense, Switch Pro, Xbox pad; Wii Remote pairing both
-ways, Nunchuk, Classic Controller, motion. Then `gamepads.txt` lines (`kind=`, `pic=`, axis remaps) for them.
+rumble and light bar felt/seen on DS4 (USB, Bluetooth), DualSense, Switch Pro, Xbox pad; Wii Remote Classic
+Controller and 1+2 pairing. Then `gamepads.txt` lines (`kind=`, `pic=`, axis remaps) for them.
 
 Not done: Bluetooth LE pads' output reports (Xbox BLE rumble), DS3 rumble; pictures in Settings / Bluetooth
 screens; a picture in Controller test (apps have no PNG decoder).
