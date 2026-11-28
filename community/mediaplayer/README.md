@@ -1,0 +1,7 @@
+# Mediaplayer
+
+Native PAPP2 media player using the PAX FFmpeg 7.1.5 port. It browses `/sd/videos/` and `/sd/`, and accepts HTTP(S) media URLs. It displays still images and plays video/audio using the enabled FFmpeg decoders, including JPEG, PNG/APNG, BMP, GIF, WebP, TIFF, JPEG 2000, JPEG-LS, ICO, TGA, DDS, DPX, HDR/PFM, PNM, PCX, PSD, QOI, SGI, Sun Raster, IFF, XBM, XPM, and XWD. SVG and JPEG XL are excluded because their external libraries are not built into this app. Video and audio decoding use software codecs; performance depends on codec, resolution, and source complexity. HEVC, VP9, and AV1 are experimental.
+
+The PAPP2 manifest keeps the app ID `video` so NetSurf's existing media-link handoff can find it. The launcher displays the name **Mediaplayer**. Still images stay open until the user exits and scale to fit while preserving aspect ratio. The package is hosted as a version-pinned binary because it is larger than the repository's 4 MB inline community-app limit.
+
+Version 0.5.7 added MPEG-2 video and AC-3, E-AC-3, and MP2 audio decoders commonly used by MPEG-TS files. Version 0.5.8 gave TS probing a bounded 1 MiB/5 second budget. Version 0.5.9 raises the packet cap to 4096 so delayed program tables and codec headers can use that byte budget, enables PMT scanning across multi-program streams, and logs stream/decoder failures with parameters. The supplied H.264/AAC `.ts`, `.mts`, and `.m2ts` sample files decode successfully with desktop FFmpeg; P4 hardware playback still needs confirmation.
